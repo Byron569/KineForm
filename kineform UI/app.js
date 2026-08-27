@@ -189,7 +189,7 @@
     multiSelect: {},
     projectName: null,
     sourceVideoName: null,
-    series: { knee: true, pelvis: true, quality: true },
+    series: { kneeL: true, kneeR: true, pelvis: true, quality: true },
     frames: [],
     markers: [],
     suggestions: [],
@@ -971,7 +971,7 @@
     infoModal({
       title: '怎么看这些时序曲线',
       html: `
-        <p><strong>膝角（蓝）</strong>——左右膝关节屈伸角度：曲线波谷约在支撑期（屈膝缓冲），波峰约在摆动后期（蹬伸）。峰值落差反映膝关节活动幅度，读不出规律时先看波峰波谷节奏是否紊乱。</p>
+        <p><strong>左膝（蓝）/ 右膝（红）</strong>——左右膝关节各自的屈伸角度：曲线波谷约在支撑期（屈膝缓冲），波峰约在摆动后期（蹬伸）。峰值落差反映膝关节活动幅度；两条曲线应交替起伏（左右腿相位相反），若一侧持续偏低或波谷明显更深，提示左右不对称或单侧代偿。</p>
         <p><strong>骨盆 Y（青）</strong>——骨盆的高度起伏，近似身体重心垂直节奏：跑步中应呈规律小幅上下，幅度过大或节奏不齐常提示躯干上下颠簸过多。</p>
         <p><strong>质量（黄）</strong>——关键点检测置信度（0.8–1.0）：越高越可信，曲线骤降段表示该帧关键点检出差，读那附近的膝/骨盆数值时需谨慎。</p>
         <p>曲线上的 <code>null / 无数据</code> 表示该帧某指标未检出（如关节被遮挡），属正常现象，分段看有效区间即可。点击图例可单独隐藏某条曲线。</p>`,
@@ -1207,10 +1207,8 @@
   }
 
   function seriesValue(frame, series) {
-    if (series === 'knee') {
-      const values = [frame.metrics.left_knee_angle, frame.metrics.right_knee_angle].filter((value) => value !== null && value !== undefined);
-      return values.length ? values.reduce((sum, value) => sum + Number(value), 0) / values.length : null;
-    }
+    if (series === 'kneeL') return frame.metrics.left_knee_angle;
+    if (series === 'kneeR') return frame.metrics.right_knee_angle;
     if (series === 'pelvis') return frame.metrics.pelvis_y;
     return frame.metrics.pose_quality;
   }
@@ -1242,7 +1240,7 @@
   function activeSeriesBounds() {
     let min = Infinity;
     let max = -Infinity;
-    for (const series of ['knee', 'pelvis', 'quality']) {
+    for (const series of ['kneeL', 'kneeR', 'pelvis', 'quality']) {
       if (!state.series[series]) continue;
       for (const frame of state.frames) {
         const value = seriesValue(frame, series);
@@ -1941,6 +1939,37 @@
     showToast(trimmed ? `项目已重命名为「${trimmed}」` : '已清除项目名，将回退显示视频 ID');
   }
 
+  async function deleteProjectFlow() {
+    if (state.service.mode !== 'live' || !state.api || !state.currentVideoId) {
+      showToast('演示模式无项目可删除');
+      return;
+    }
+    const videoId = state.currentVideoId;
+    const displayName = state.projectName || videoId;
+    const confirmed = await confirmModal({
+      title: '删除项目',
+      message: `将彻底删除项目「${displayName}」的全部数据（视频、标注、分析结果），删除后不可恢复。确定删除吗？`,
+      confirmText: '删除',
+      cancelText: '取消',
+      dangerous: true,
+    });
+    if (!confirmed) return;
+    // 取消未落盘的防抖保存，避免删除后竞态 PUT 404
+    window.clearTimeout(state.persistTimer);
+    state.persistTimer = null;
+    try {
+      await state.api.deleteProject(videoId);
+    } catch (error) {
+      const apiError = handleApiError(error);
+      showToast(`项目删除失败：${apiError.message}`, true);
+      return;
+    }
+    showToast(`已删除项目「${displayName}」`);
+    // 删除的是当前项目 → 清空选中，loadProjectList 会切换到剩余首个项目
+    if (state.currentVideoId === videoId) state.currentVideoId = null;
+    await loadProjectList();
+  }
+
   async function startAnalysisFlow() {
     if (state.service.mode !== 'live' || !state.api) {
       showToast('视频分析需要后端服务，请先连接分析服务', true);
@@ -2060,6 +2089,8 @@
     if (!select) return;
     const live = state.service.mode === 'live' && state.projects.length > 0;
     select.hidden = !live;
+    const deleteButton = $('#projectDeleteButton');
+    if (deleteButton) deleteButton.hidden = !live;
     if (!live) return;
     select.innerHTML = state.projects.map((project) => {
       const selected = project.video_id === state.currentVideoId ? ' selected' : '';
@@ -2252,6 +2283,7 @@
       case 'delete-selected-markers': deleteSelectedMarkers(); break;
       case 'clear-markers': void clearAllMarkers(); break;
       case 'rename-project': void renameProject(); break;
+      case 'delete-project': void deleteProjectFlow(); break;
       case 'help-chart': infoChartHelp(); break;
       case 'help-zscore': infoZscoreHelp(); break;
       case 'toggle-overlay':
@@ -2561,3 +2593,4 @@
   });
   document.addEventListener('DOMContentLoaded', () => { void init(); });
 })();
+

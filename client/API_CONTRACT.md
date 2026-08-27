@@ -108,7 +108,7 @@ metrics 全部 34 个键（无效帧为 `null`，**不是 0**）：
 
 ## 4. 服务 API（P0）
 
-后端形态：**FastAPI 本地服务**（`backend/`，**已实现，版本 0.1.0**），由 Electron 主进程拉起（`127.0.0.1` 动态端口），保持完全离线；运行与集成形态见 §8。端点分两组：任务组 6 个——提交（§4.1）、任务详情轮询（§4.2）、取消（§4.3）、任务列表（§4.4）、健康探测（§4.5）、视频分析启动（§4.8）；项目资源组 9 个（§4.7，前端数据加载入口）。错误体统一（§4.6）。
+后端形态：**FastAPI 本地服务**（`backend/`，**已实现，版本 0.1.0**），由 Electron 主进程拉起（`127.0.0.1` 动态端口），保持完全离线；运行与集成形态见 §8。端点分两组：任务组 6 个——提交（§4.1）、任务详情轮询（§4.2）、取消（§4.3）、任务列表（§4.4）、健康探测（§4.5）、视频分析启动（§4.8）；项目资源组 10 个（§4.7，前端数据加载入口 + 项目删除）。错误体统一（§4.6）。
 
 ### 4.1 POST /api/analysis/submit（提交分析）
 
@@ -325,6 +325,8 @@ P0 错误码汇总：
 | `video_not_found` | 400 | start | `video_path` 指向的文件不存在（§4.8；与上文资源组同名码按端点与 HTTP 状态区分） |
 | `video_invalid` | 400 | start | `video_path` 非字符串/为空，或扩展名不在白名单（§4.8） |
 | `meta_not_found` | 404 | projects/meta | 项目存在但无 meta.json（旧项目）——前端回退显示默认值 |
+| `project_in_use` | 409 | projects DELETE | 该项目有 queued/running/cancelling 任务，先取消或等待结束 |
+| `project_delete_failed` | 500 | projects DELETE | 项目目录删除失败（文件被占用等） |
 
 ### 4.7 项目资源端点（前端数据加载入口，已实现）
 
@@ -375,6 +377,19 @@ P0 错误码汇总：
 
 ```json
 {"status": "saved", "path": "outputs/<video_id>/annotations.json"}
+```
+
+#### DELETE /api/projects/{video_id}（删除项目）
+
+彻底删除项目目录 `outputs/<video_id>/`（rmtree，**不可恢复**；前端负责二次确认弹窗）。删除当前加载项目后前端应刷新项目列表并切换到剩余首个项目（或空态）。
+
+- 项目无效 / 含穿越片段 → 404 `project_not_found`（同 §4.7 防穿越规则）；
+- 该项目存在 `queued` / `running` / `cancelling` 任务 → 409 `project_in_use`（避免与 runner 写产物竞争；终态任务不阻塞）；
+- 目录删除失败（文件被占用等）→ 500 `project_delete_failed`；
+- 响应（200）：
+
+```json
+{"status": "deleted", "video_id": "<video_id>"}
 ```
 
 #### GET /api/projects/{video_id}/video 与 GET /api/projects/{video_id}/analysis
@@ -789,3 +804,4 @@ Electron 壳已实现（`electron/` 目录），要点：
 
 - CORS：`allow_origins = *`——纯本地回环服务且无凭证，无实际风险；
 - 任务表为**进程内存态**：服务重启即清空（先例：ComfyUI 的 history 同语义）——客户端按 §4.2 的 404 处理，提示用户重新提交。
+

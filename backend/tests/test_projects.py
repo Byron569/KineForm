@@ -373,3 +373,73 @@ def test_task_result_succeeded_and_report_missing(make_client, outputs_dir,
         resp = client.get(f'/api/tasks/{task_id}/result')
         assert resp.status_code == 404
         assert resp.json()['error']['code'] == 'report_not_found'
+
+
+# ---------- DELETE /api/projects/{video_id} ----------
+
+def test_delete_project_removes_directory(make_client, outputs_dir,
+                                           stage_project):
+    """删除成功 → 200 + 目录整树消失 + 列表不再包含该项目。"""
+    stage_project('vid_del', events=True, annotations=True,
+                  source_video=True, analysis_video=True)
+    with make_client() as client:
+        resp = client.delete('/api/projects/vid_del')
+        assert resp.status_code == 200
+        assert resp.json() == {'status': 'deleted', 'video_id': 'vid_del'}
+        assert not (outputs_dir / 'vid_del').exists()
+
+        listed = client.get('/api/projects').json()['projects']
+        assert all(p['video_id'] != 'vid_del' for p in listed)
+
+
+def test_delete_project_not_found(make_client):
+    with make_client() as client:
+        resp = client.delete('/api/projects/vid_nope')
+        assert resp.status_code == 404
+        assert resp.json()['error']['code'] == 'project_not_found'
+
+
+def test_delete_project_traversal_guard(make_client, outputs_dir):
+    """穿越片段与其他资源端点同一守卫：统一 404 project_not_found。"""
+    outside = outputs_dir.parent / 'outside_decoy'
+    outside.mkdir(parents=True, exist_ok=True)
+    (outside / 'motion.json').write_text('{}', encoding='utf-8')
+    try:
+        with make_client() as client:
+            for bad in ('%2E%2E', 'a..b', '..%5Cetc', 'x:y'):
+                resp = client.delete(f'/api/projects/{bad}')
+                assert resp.status_code == 404, bad
+                assert resp.json()['error']['code'] == 'project_not_found', bad
+    finally:
+        assert (outside / 'motion.json').exists()
+
+
+def test_delete_project_in_use_409(make_client, outputs_dir, stage_video,
+                                   make_payload, wait_for):
+    """queued/running/cancelling 任务占用 → 409 project_in_use，目录保留。"""
+    stage_video('vid_busy')
+    with make_client('slow') as client:
+        task_id = client.post('/api/analysis/submit',
+                              json=make_payload('vid_busy')).json()['task_id']
+        wait_for(client, task_id, 'running')
+        resp = client.delete('/api/projects/vid_busy')
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body['error']['code'] == 'project_in_use'
+        assert 'running' in body['error']['message']
+        assert (outputs_dir / 'vid_busy' / 'motion.json').is_file()
+
+
+def test_delete_project_after_task_finished(make_client, outputs_dir,
+                                             stage_video, make_payload,
+                                             wait_for):
+    """终态任务（succeeded）不阻塞删除。"""
+    stage_video('vid_over')
+    with make_client('fast') as client:
+        task_id = client.post('/api/analysis/submit',
+                              json=make_payload('vid_over')).json()['task_id']
+        wait_for(client, task_id, 'succeeded')
+        resp = client.delete('/api/projects/vid_over')
+        assert resp.status_code == 200
+        assert not (outputs_dir / 'vid_over').exists()
+

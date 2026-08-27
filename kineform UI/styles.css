@@ -1938,6 +1938,11 @@ body {
   stroke: #4285f4;
 }
 
+.series-knee-r,
+.chart-series-knee-r {
+  stroke: #ea4335;
+}
+
 .series-pelvis,
 .chart-series-pelvis {
   stroke: #0043ad;
@@ -2642,6 +2647,7 @@ textarea::placeholder {
 }
 
 .series-dot.blue { background: var(--blue); }
+.series-dot.red { background: var(--red); }
 .series-dot.cyan { background: var(--cyan); }
 .series-dot.yellow { background: var(--yellow); }
 
@@ -2691,6 +2697,7 @@ textarea::placeholder {
 }
 
 .series-knee { stroke: var(--blue); }
+.series-knee-r { stroke: var(--red); }
 .series-pelvis { stroke: var(--cyan); }
 .series-quality { stroke: var(--yellow); stroke-dasharray: 4 4; }
 
@@ -3137,6 +3144,7 @@ textarea::placeholder {
 }
 
 .series-knee { stroke: #4285f4; }
+.series-knee-r { stroke: #ea4335; }
 .series-pelvis { stroke: #0043ad; }
 .series-quality { stroke: #34a853; }
 .chart-playhead { stroke: #4285f4; }
@@ -3282,6 +3290,34 @@ textarea {
   background: #f9f9fa;
   color: #0e1115;
   font-size: 10px;
+}
+
+.project-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.project-delete {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease,
+              border-color 120ms ease;
+}
+
+.project-delete:hover,
+.project-delete:focus-visible {
+  color: var(--red);
+  border-color: var(--red);
 }
 
 /* --- Marker drag (D2) --- */
@@ -3955,3 +3991,4 @@ body.is-marker-dragging {
   flex: none;
   align-self: center;
 }
+

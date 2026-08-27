@@ -14,6 +14,7 @@ r"""项目资源端点：项目枚举 / motion / events / annotations / 视频 /
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ from ..dependencies import get_outputs_dir, get_task_manager
 from ..schemas.projects import (
     AnnotationsDocument,
     AnnotationsSaveResponse,
+    ProjectDeleteResponse,
     ProjectListResponse,
 )
 from ..services.task_manager import TaskManager
@@ -191,6 +193,33 @@ def put_annotations(video_id: str,
             'path': f'outputs/{video_id}/annotations.json'}
 
 
+@router.delete('/api/projects/{video_id}', response_model=ProjectDeleteResponse)
+def delete_project(video_id: str,
+                   task_manager: TaskManager = Depends(get_task_manager),
+                   outputs_dir: Path = Depends(get_outputs_dir)) -> dict:
+    """删除项目（整目录 rmtree，不可恢复；前端负责二次确认）。
+
+    守卫：该项目存在 queued/running/cancelling 任务时拒绝删除
+    （409 project_in_use）——分析进行中删目录会与 runner 写产物竞争。
+    """
+    project_dir = _require_project_dir(outputs_dir, video_id)
+    tasks, _ = task_manager.list_tasks()
+    for task in tasks:
+        if (task['video_id'] == video_id
+                and task['status'] in ('queued', 'running', 'cancelling')):
+            raise ProjectError(
+                409, 'project_in_use',
+                f'该项目有进行中的任务（{task["status"]}），'
+                f'请先取消或等待结束: {video_id}')
+    try:
+        shutil.rmtree(project_dir)
+    except OSError as exc:
+        raise ProjectError(
+            500, 'project_delete_failed',
+            f'删除项目目录失败: {video_id}（{exc}）') from exc
+    return {'status': 'deleted', 'video_id': video_id}
+
+
 @router.get('/api/projects/{video_id}/video')
 def get_video(video_id: str,
               outputs_dir: Path = Depends(get_outputs_dir)) -> FileResponse:
@@ -223,3 +252,4 @@ def get_task_result(
         Path(outputs_dir) / video_id / 'score_report.json',
         'report_not_found',
         f'未找到分析报告: outputs/{video_id}/score_report.json')
+

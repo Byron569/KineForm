@@ -24,6 +24,8 @@
     queue_full: 'retry',
     task_not_found: 'restart',
     task_finished: 'refresh-task',
+    project_in_use: 'wait-task',
+    project_delete_failed: 'retry',
   };
 
   function asFiniteNumber(value, fallback = null) {
@@ -168,6 +170,7 @@
       fetchEvents: (videoId) => request(`/api/projects/${encodeURIComponent(videoId)}/events`),
       fetchAnnotations: (videoId) => request(`/api/projects/${encodeURIComponent(videoId)}/annotations`),
       saveAnnotations: (videoId, document) => request(`/api/projects/${encodeURIComponent(videoId)}/annotations`, { method: 'PUT', body: JSON.stringify(document) }),
+      deleteProject: (videoId) => request(`/api/projects/${encodeURIComponent(videoId)}`, { method: 'DELETE' }),
       fetchTaskResult: (taskId) => request(`/api/tasks/${encodeURIComponent(taskId)}/result`),
       videoUrl: (videoId) => `${rootUrl}/api/projects/${encodeURIComponent(videoId)}/video`,
       analysisUrl: (videoId) => `${rootUrl}/api/projects/${encodeURIComponent(videoId)}/analysis`,
@@ -215,3 +218,4 @@
     normalizeMotion,
   };
 });
+

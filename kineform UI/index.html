@@ -21,7 +21,10 @@
           <span class="topbar-divider" aria-hidden="true"></span>
           <div class="project-context">
             <span class="overline">运动表现分析</span>
-            <select id="projectSelect" class="project-select mono" hidden aria-label="切换项目"></select>
+            <div class="project-switch-row">
+              <select id="projectSelect" class="project-select mono" hidden aria-label="切换项目"></select>
+              <button class="project-delete" id="projectDeleteButton" data-action="delete-project" hidden aria-label="删除当前项目" title="删除当前项目（不可恢复）"><img class="icon icon-14" src="assets/icons/trash-2.svg" alt="" /></button>
+            </div>
           </div>
           <button class="topbar-button primary" data-action="analyze-video" id="analyzeVideoButton" title="分析视频 Ctrl+O">
             <img class="icon icon-16" src="assets/icons/file.svg" alt="" />
@@ -180,7 +183,8 @@
               </div>
               <div class="chart-head-right">
                 <div class="chart-tabs" role="tablist" aria-label="曲线指标">
-                  <button class="chart-tab active" data-series="knee" role="tab" aria-selected="true"><i class="series-dot blue"></i>膝角</button>
+                  <button class="chart-tab active" data-series="kneeL" role="tab" aria-selected="true"><i class="series-dot blue"></i>左膝</button>
+                  <button class="chart-tab active" data-series="kneeR" role="tab" aria-selected="true"><i class="series-dot red"></i>右膝</button>
                   <button class="chart-tab active" data-series="pelvis" role="tab" aria-selected="true"><i class="series-dot cyan"></i>骨盆 Y</button>
                   <button class="chart-tab active" data-series="quality" role="tab" aria-selected="true"><i class="series-dot yellow"></i>质量</button>
                 </div>
@@ -191,7 +195,8 @@
               <div class="chart-y-labels mono"><span>180°</span><span>120°</span><span>60°</span><span>0°</span></div>
               <svg class="chart-svg" viewBox="0 0 900 140" preserveAspectRatio="none" aria-label="姿态指标曲线">
                 <g class="chart-grid"><path d="M0 12H900 M0 47H900 M0 82H900 M0 117H900" /></g>
-                <path class="chart-series series-knee" data-series-path="knee" d="M0 67 C50 65 80 80 112 72 C145 64 170 35 210 42 C248 49 271 94 310 88 C348 82 369 44 410 40 C450 36 468 67 506 64 C546 61 572 82 612 76 C650 70 675 49 715 55 C755 61 783 74 824 68 C850 64 876 64 900 66" />
+                <path class="chart-series series-knee" data-series-path="kneeL" d="M0 67 C50 65 80 80 112 72 C145 64 170 35 210 42 C248 49 271 94 310 88 C348 82 369 44 410 40 C450 36 468 67 506 64 C546 61 572 82 612 76 C650 70 675 49 715 55 C755 61 783 74 824 68 C850 64 876 64 900 66" />
+                <path class="chart-series series-knee-r" data-series-path="kneeR" d="M0 74 C50 76 80 60 112 68 C145 74 170 92 210 85 C248 78 271 40 310 46 C348 52 369 88 410 84 C450 80 468 50 506 55 C546 59 572 42 612 49 C650 55 675 78 715 72 C755 66 783 52 824 58 C850 62 876 60 900 63" />
                 <path class="chart-series series-pelvis" data-series-path="pelvis" d="M0 99 C48 94 87 102 120 96 C160 89 187 77 225 81 C266 84 284 99 324 96 C363 93 390 68 430 72 C470 76 498 88 540 84 C583 80 609 66 650 71 C690 76 724 91 762 86 C800 81 845 85 900 79" />
                 <path class="chart-series series-quality" data-series-path="quality" d="M0 34 C46 31 84 39 126 34 C168 29 210 32 252 30 C295 28 338 36 380 31 C422 26 470 34 512 31 C554 28 596 33 638 29 C680 25 728 32 770 27 C812 23 858 30 900 25" />
                 <line class="chart-playhead" id="chartPlayhead" x1="160" y1="0" x2="160" y2="140" />
@@ -346,3 +351,4 @@
     <script src="app.js?v=contract-ui-20260827-1"></script>
   </body>
 </html>
+

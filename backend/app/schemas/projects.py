@@ -51,3 +51,11 @@ class AnnotationsDocument(BaseModel):
 class AnnotationsSaveResponse(BaseModel):
     status: Literal['saved']
     path: str
+
+
+class ProjectDeleteResponse(BaseModel):
+    """DELETE /api/projects/{video_id} 响应。"""
+
+    status: Literal['deleted']
+    video_id: str
+

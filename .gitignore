@@ -45,3 +45,7 @@ Thumbs.db
 
 # ---- 各子项目自身的忽略（由各自 .gitignore 补充）----
 electron/dist/
+
+# ---- Codex 隔离工作树 ----
+.worktrees/
+

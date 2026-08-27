@@ -1,0 +1,19 @@
+{
+  "version": "1",
+  "name": "KineForm Annotator",
+  "designLibrary": {
+    "id": "dl_builtin_apple",
+    "name": "苹果",
+    "path": "c:\\Users\\Byron\\.trae-cn\\design_libraries\\dl_builtin_apple"
+  },
+  "theme": "dark",
+  "nodes": [
+    {
+      "id": "page-main",
+      "type": "page",
+      "name": "Main Interface",
+      "deviceType": "desktop",
+      "htmlSrc": "pages/main.html"
+    }
+  ]
+}

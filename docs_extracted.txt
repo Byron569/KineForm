@@ -1,0 +1,1445 @@
+﻿================================================================================
+FILE: D:\跑步与跳高运动姿态分析：关节角度、关键事件、优劣判定标准与公开训练数据研究报告.docx
+================================================================================
+#跑步与跳高运动姿态分析：关节角度、关键事件、优劣判定标准与公开训练数据研究报告
+#执行摘要
+针对你现在的技术路线——YOLO 人体关键点检测 → 骨架连接 → 关节角计算 → 动作阶段识别 → 姿态质量评价——这次检索后最重要的结论不是找到一个简单的“膝角必须等于多少度”，而是：
+运动科学文献并不存在一个跨运动员、跨速度、跨动作阶段通用的“标准姿态角度表”。真正有意义的标准是“动作阶段 + 运动水平 + 速度/成绩 + 个体条件”下的参考分布和性能关联。
+例如，世界级短跑运动员最大速度跑中，触地时膝角、髋角、踝角具有非常集中的典型范围，但论文同时发现速度还与髋伸角速度、脚向后速度、触地时间、支撑期膝关节活动范围有关，因此单独判断某一帧“膝角 155° 是好还是坏”是不可靠的。[1]
+长跑更是如此。2017 世界田径锦标赛马拉松运动员的研究发现，后跟着地与非后跟着地运动员在初始接触时确实存在膝、踝等角度差异，但这些差异并不能简单解释成绩优劣。因此，你的系统不应该把“后跟着地=错误”“前掌着地=正确”写成硬规则。[2]
+跳高反而有一篇非常适合你做“好/坏姿态监督标签”的世界级研究：Nicholson 等人在世界室内田径锦标赛中直接比较了同一批顶尖男子跳高运动员在相同高度上的成功跳和失败跳。成功动作在起跳脚 touchdown 时表现出更高的水平速度、更短的 CM–foot 距离、更短的最终支撑时间，以及支撑腿和摆动腿特定的关节配置；而且大多数区别出现在 touchdown 而不是 toe-off。这对于你的模型非常重要：跳高不应该只分析“离地那一帧”，必须分析起跳脚落地到离地的整个事件。[3]
+在公开数据方面，对你的项目最有价值的并不是 Human3.6M 这种通用数据集，而是目前已经出现的几类运动专用数据：
+AthletePose3D 约 130 万帧、16.5 万独立姿态，包含 running 和 track & field，并直接提供 COCO/Human3.6M 格式以及 YOLOv8 检测结果；AthleticsPose 则是真实田径场采集，23 名运动员、约 50 万帧，直接包含 starting dash、sprint、distance running 等类别；BioCV 同时提供 200 fps 九机位视频、200 Hz 光学动捕和 1000 Hz 测力板，是训练“视觉姿态→真实运动学/动力学”模型极其重要的 ground truth；AddBiomechanics 则有 273 人、超过 2400 万帧以及关节力矩、地面反作用力等信息。[4]
+因此，我建议你的最终架构不要是：
+YOLO → 角度 → if knee_angle < X: 错误
+而应该升级为：
+YOLO / 3D Pose → 完整动作事件分割 → 事件内运动学特征 → 个体/速度归一化 → 与精英参考分布比较 → 性能模型 → 可解释评分
+这个思路与世界田联比赛级生物力学分析和当前运动姿态数据集的设计方式更加一致。[5]
+#关键事件必须先于“姿态好坏”判断
+#不要等间隔抽帧，要把动作拆成事件
+这是你整个项目最应该先改变的一点。
+短跑研究 Mattes 等并不是每隔五帧读取一次角度，而是按照脚离地、摆腿最大屈曲、膝抬高、touchdown、下一次 toe-off 等事件建立特征；他们把 touchdown 定义为第一帧出现地面接触，toe-off 则依据最后存在地面接触的图像确定，并利用鞋底压缩帮助识别接触状态。[6]
+马拉松世界锦标赛研究同样把一个跑步周期划为 initial contact、midstance、toe-off、midswing 等关键事件，而不是随机取帧。Initial contact 是脚首次明显接触地面；midstance 是脚的质心在前后方向上位于身体质心下方；midswing 取最小膝角；toe-off 是脚离地前最后一个可见支撑瞬间。[7]
+跳高 World Athletics/Leeds Beckett 的研究则把最后几步和起跳拆分为倒数接触、最后腾空、起跳脚 TD、起跳支撑、TO、飞行、最高点和过杆。[3]
+你的事件序列可以定义成：
+--- TABLE ---
+
+--- /TABLE ---
+短跑重点应该放在 C→D→E→F→G→I，因为最大速度与摆腿后拉速度、髋伸角速度和支撑期腿部运动方式有明显关系。[8]
+长跑：
+--- TABLE ---
+
+--- /TABLE ---
+跳高则应该：
+--- TABLE ---
+
+--- /TABLE ---
+Nicholson 等发现成功与失败跳高动作最大的共同差异主要发生在 TD 附近而非 TO，因此这张事件图对你的模型并不是“展示用”，而应该成为训练标签结构。[3]
+#你的训练标签应该从 frame label 变成 event label
+我建议最终一条动作数据类似：
+sport = sprint
+athlete_id = S012
+speed = 10.52 m/s
+
+event:
+    touchdown_frame = 417
+    midstance_frame = 421
+    toeoff_frame = 428
+
+touchdown:
+    hip_angle = ...
+    knee_angle = ...
+    ankle_angle = ...
+    trunk_angle = ...
+    foot_velocity = ...
+
+stance:
+    min_knee_angle = ...
+    knee_rom = ...
+    ankle_rom = ...
+    hip_extension_rom = ...
+    contact_time = ...
+
+swing:
+    min_knee_angle = ...
+    max_knee_lift = ...
+    peak_hip_extension_velocity = ...
+
+label:
+    performance_level = ...
+    running_speed = ...
+这样你的大模型学习的是技术动作结构，而不是“这一帧看起来像不像标准动作”。
+#短跑：可直接写进系统的角度与性能指标
+#最大速度跑的精英参考值
+目前对你的 YOLO 关节角项目特别实用的一篇论文，是 Mattes 等对 26 名德国高水平男子短跑运动员最大速度跑的研究。运动员在 flying 30 m 条件下达到约 10.6 ± 0.4 m/s，论文通过关键事件建立完整短跑技术模型。[9]
+下面这些数值适合作为你的精英最大速度参考分布，而不是全人群统一合格线：
+--- TABLE ---
+短跑事件 | 指标 | 精英样本典型值 | 对模型的意义
+Toe-off | 髋角 | 181 ± 5° | 后蹬末端髋部姿态参考
+Toe-off | 膝角 | 155 ± 7° | 离地时腿部伸展状态
+Toe-off | 踝角 | 147 ± 7° | 踝部末端跖屈状态
+摆动中期 | 最小膝角 | 40 ± 8° | 小腿折叠程度
+最大抬腿 | 膝角 | 85 ± 7° | 前摆腿结构
+最大抬腿 | 大腿相对水平角 | 21 ± 4° | Knee lift 指标
+Touchdown | 髋角 | 147 ± 8° | 着地时髋部姿态
+Touchdown | 膝角 | 156 ± 6° | 着地腿伸展状态
+Touchdown | 踝角 | 127 ± 7° | 着地踝姿态
+支撑期 | 踝屈曲变化 | 24 ± 6° | 支撑期弹性/顺应性特征
+支撑期 | 髋伸展变化 | 35 ± 10° | 身体向前推进过程
+支撑期 | 膝伸展变化 | 14 ± 6° | 支撑腿 ROM
+整体 | Ground contact | 96 ± 7 ms，范围约 85–110 ms | 最大速度短跑非常关键的时间指标
+整体 | Step length | 2.32 ± 0.11 m | 与速度相关
+整体 | Step rate | 4.56 ± 0.22 Hz | 步频
+--- /TABLE ---
+这些角度必须使用该论文自己的角度定义进行对应，不能把你 YOLO 算出的任意“内夹角”直接与表中数据比较。[1]
+真正与速度关系特别值得你训练的，不只是绝对角度。该研究发现，更高跑速与更大的触地前髋伸角速度、更大的脚向后运动速度、更短触地时间，以及较小的支撑期膝关节屈伸变化相关；其中触地前脚的垂直/后摆速度和跑速的相关性尤其明显。[10]
+所以你的 sprint feature vector 最好至少包含：
+TD:
+hip_angle
+knee_angle
+ankle_angle
+foot_x_relative_to_hip
+trunk_lean
+
+pre_TD:
+hip_extension_angular_velocity
+foot_backward_velocity
+
+stance:
+contact_time
+min_knee_angle
+knee_flexion_ROM
+knee_extension_ROM
+ankle_ROM
+hip_extension_ROM
+
+swing:
+min_knee_angle
+max_thigh_angle
+max_knee_lift
+而不是只计算三种角度。
+#“膝盖越直越好吗？”不是这样
+Mattes 的数据说明世界级最大速度短跑的支撑腿在 touchdown 已经比较伸展，而且速度较快的运动员通常表现出较小的支撑期膝关节活动范围；但这不能简化成“膝角越接近 180°越好”，因为跑步需要吸收冲击、维持腿部刚度并完成推进，真正重要的是touchdown 姿态 + 支撑期变化量 + 支撑时间的组合。[8]
+AthleticsPose 的田径姿态研究同样专门把“支撑腿膝角”和“最大 knee-drive velocity”作为 sprint-specific kinematic indicators，而不仅仅评估 3D 关键点位置误差。[11]
+#个体化短跑标准非常重要
+Miyashiro 等对 79 名男子短跑运动员的研究很适合你建立第二阶段算法：研究者发现，腿部运动学应同时考虑跑速、腿长、步频和摆动/支撑时间关系，而不是给所有运动员一个角度模板。[12]
+文中给出的部分回归关系甚至可以直接变成你的 baseline：
+以及：
+其中 RS 为 running speed、LL 为 leg length、SF 为 step frequency，SSR 为 swing/support ratio。[12]
+这说明你的模型数据库应该保存：
+body_height
+leg_length
+running_speed
+performance_level
+然后建立：
+而不是：
+#起跑阶段
+一项比较快、慢高水平短跑运动员的实验发现，较快组在起跑器前、后踏板之间的总作用力分配更加均衡，前后踏板力差约为 17.3%，慢组约为 28.2%；这说明起跑不能只观察前腿，还需要关注后腿是否真正参与水平推进。[13]
+另一项专门改变预备姿势后腿膝角的实验测试了 90°、115°、135° 三种条件，结果指出 90° 后膝条件可以促进后腿 push action；但这是特定实验条件得到的结论，因此更适合成为“起跑姿态候选参考”，而不是你系统里的普适硬阈值。[14]
+这意味着你的短跑应该至少分成：
+start_set
+block_push
+first_step
+acceleration
+max_velocity
+不能用最大速度跑的 TD knee ≈ 156° 去评价第一步加速。
+#“角度代表什么发力”应该这样理解
+短跑加速研究显示，髋伸肌群、尤其 hamstrings，在产生水平推进力中具有重要作用；因此你的视觉系统观察到的髋伸展、摆动腿快速后拉等运动学参数可以作为“水平推进策略”的视觉代理变量，但不能把二维角度直接等同于肌肉力量。[15]
+也就是说：
+Pose → kinematic proxy → 与动力学存在统计关系
+而不是：
+一个角度 = 一个确定的力值
+除非你以后利用 AddBiomechanics、BioCV 等同步动力学数据训练：
+这才有可能从视觉进一步预测“发了多大的力”。[16]
+#长跑：角度标准、着地方式与负荷判定
+#世界级马拉松运动员的直接比赛数据
+Hanley、Bissas、Merlino 对 2017 世界田径锦标赛中的 28 名男子和 28 名女子马拉松运动员进行了比赛现场生物力学分析，在约 29.5 km 和 40 km 处用 50 Hz 高清视频采集，并额外使用高速影像帮助确定足部着地模式。[17]
+这篇研究特别适合作为你“长跑 event-angle reference database”的第一版。
+不过必须特别注意论文角度定义：
+髋角：躯干—大腿，解剖站立约 180°；
+膝角：大腿—小腿，解剖站立约 180°；
+踝角：小腿—足部，该论文站立参考约 110°；
+肩角：躯干—上臂，站立定义为 0°，向后可以出现负角；
+肘角：上臂—前臂，伸直约 180°。[7]
+所以尤其是踝角和肩角绝不能未经转换直接拿 YOLO 三点夹角比较。
+#Initial Contact 的世界级参考
+--- TABLE ---
+指标 | 男子世界级马拉松 | 女子世界级马拉松 | 使用方式
+髋角 | 约 142–144° | 约 145–146° | Initial Contact 参考
+膝角 | 约 149° | 约 148° | 着地腿伸展程度
+踝角 | 约 102–103° | 约 98–99° | 必须采用论文角度定义
+肩角 | 约 −47 至 −48° | 约 −50 至 −51° | 手臂摆至身体后方
+肘角 | 约 68–70° | 约 66° | 摆臂屈曲状态
+--- /TABLE ---
+这些数据来自世界锦标赛比赛环境，不是实验室慢跑。[18]
+#Mid-Stance 的参考
+--- TABLE ---
+指标 | 男子 | 女子
+髋角 | ≈ 151° | ≈ 152°
+膝角 | ≈ 131° | ≈ 131°
+踝角 | ≈ 82° | ≈ 81°
+肩角 | ≈ −26° | ≈ −28°
+肘角 | ≈ 71° | ≈ 72°
+--- /TABLE ---
+[19]
+这一帧非常适合你计算：
+knee_compression = knee_IC - knee_midstance
+ankle_change = ankle_IC - ankle_midstance
+hip_change = hip_midstance - hip_IC
+相比单独判断某个 midstance 膝角，“IC→midstance 的变化量”更加接近真实的支撑缓冲策略。
+#Toe-off 的参考
+--- TABLE ---
+指标 | 男子 | 女子
+髋角 | ≈ 192° | ≈ 191°
+膝角 | ≈ 163° | ≈ 160°
+踝角 | ≈ 127° | ≈ 124°
+肩角 | ≈ 27° | ≈ 27°
+肘角 | ≈ 55° | ≈ 58°
+--- /TABLE ---
+[20]
+这组数据使你可以完整描述：
+而不是只有“落地角”。
+#Mid-swing 也值得检测
+男子世界级马拉松运动员 midswing 最小膝角由约 50 ± 6° 在后程变到约 55 ± 7°；女子约为 63 ± 10° → 65 ± 11°。男子后程变化达到统计意义，说明 midswing knee angle 有潜力作为疲劳/动作变化特征。[21]
+因此你未来可以输出：
+running_cycle_125
+    IC knee = ...
+    Midstance knee = ...
+    TO knee = ...
+    Midswing min knee = ...
+
+fatigue_trend:
+    first_20_cycles_mean
+    last_20_cycles_mean
+    delta
+这会比每一帧打“好/坏”高级很多。
+#不要把后跟着地自动判为坏姿态
+这个结论非常重要。
+世界锦标赛研究发现 RFS 与 non-RFS 确实存在一些 kinematic differences，例如男子 RFS 在 initial contact 的膝角约 152°，NRFS 约 147°，踝角也存在差异；但这些差异主要集中在 Initial Contact，而且很多绝对差异只有几度，并没有提供足够依据把某一种 footstrike 直接定义成更优秀。[22]
+所以：
+rearfoot strike = technique_class
+midfoot strike = technique_class
+forefoot strike = technique_class
+而不应该：
+rearfoot strike = bad
+forefoot strike = good
+#更可靠的“好坏”指标是负荷变化
+Heiderscheit 等让 45 名健康跑者在恒定速度下使用 preferred cadence、±5% 和 ±10% 步频。提高步频会缩短步长，并降低部分膝、髋机械负荷和身体垂直运动；这说明步频调整可以改变关节负荷，但并不存在论文支持的所有人必须 180 spm 的统一标准。[23]
+Lenhart 等进一步发现，在其实验条件下，把步频提高到个人 preferred cadence 的 110% 时，峰值 patellofemoral joint force 下降约 14%，同时峰值支撑期膝屈曲也有所降低。[24]
+因此长跑系统建议输出两个不同评价维度：
+performance_score
+load_management_score
+不要把二者混成一个“姿势得分”。
+#跳高：目前最适合训练“成功/失败”的运动科学标准
+#成功与失败动作的世界级直接对照
+Nicholson 等 2024 年研究分析了 2018 世界室内田径锦标赛男子跳高决赛中的世界级运动员，并只选择同一个运动员、同一个高度分别有成功和失败尝试的数据，因此它比简单拿一个冠军动作当“标准模板”可靠得多。研究使用四台 200 Hz 高速摄像机进行三维重建，并采用 17 点全身模型。[3]
+这篇论文对你的模型价值非常高。
+#可以直接放进跳高特征库的成功/失败数据
+--- TABLE ---
+特征 | 成功跳 SU | 失败跳 UN | 解释
+起跳脚 TD 时水平 CM 速度 | 5.31 m/s | 4.98 m/s | 成功跳保留更多助跑水平速度
+TD 时 CM–foot 水平距离 | 0.77 m | 0.80 m | 成功跳脚相对身体不过度伸到前方
+最终地面接触时间 | 0.169 s | 0.178 s | 成功跳支撑转换更快
+起跳腿踝角 TD | 120.96 ± 4.21° | 126.48 ± 6.33° | 大效应趋势，但论文中未达到传统显著水平，不能当硬阈值
+起跳腿膝角 TD | 162.77 ± 5.69° | 167.05 ± 6.17° | 成功动作 touchdown 配置不同
+起跳腿最小膝角 | 140.22 ± 6.96° | 135.93 ± 5.94° | 支撑期压缩策略不同
+起跳腿膝角 TO | 170.53 ± 5.47° | 170.12 ± 5.27° | 到 TO 时反而非常接近
+摆动/后侧腿膝角 TD | 100.00 ± 8.15° | 111.19 ± 9.92° | 成功与失败差异明显
+TO→CM apex 重心上升 | 约0.97 m | 约0.93 m | 成功跳获得更多垂直高度
+--- /TABLE ---
+[25]
+这里有一个对你的 AI 系统非常关键的发现：
+TO 时的膝角几乎一样，但 TD 时已经出现明显区别。
+因此如果你以前的算法只截取“起跳脚马上离地”的一帧：
+TO frame → knee angle
+实际上很可能错过了最有判别力的信息。Nicholson 等也明确指出，大部分成功与失败差异发生在起跳阶段较早的 touchdown，而不是 toe-off。[3]
+你的跳高模型应该输入整个：
+#CM-foot 距离值得加入 YOLO 项目
+这也是一个我强烈推荐你加进去的特征。
+论文定义 CM–foot distance 为身体质心与支撑脚之间的水平距离。成功跳较短的 TD CM–foot distance 与较小的 backward lean / braking 情况同时出现。[3]
+YOLO 不一定能准确估计人体真实 CM，但你可以先定义视觉近似：
+然后：
+或者以后通过人体分段参数估计 CM。
+一定要除以身高、腿长或其他身体尺度进行归一化，否则 1.95 m 与 1.70 m 的运动员不能直接比较。
+#Hip–Shoulder Separation 也是跳高特有的重要指标
+Nicholson 等 2022 年对 29 名世界级男女跳高运动员进行研究，其中包括 17 名男子、12 名女子，使用 2017 世界锦标赛和 2018 世界室内锦标赛数据；影像采集达到 120–200 Hz。研究直接分析了：
+即左右髋形成的轴线与左右肩形成的轴线之间的旋转差。[26]
+这种 hip–shoulder interaction 是 Fosbury Flop 从曲线助跑进入背对横杆过杆姿态时形成长轴旋转的重要策略；但世界级运动员之间存在相当明显的个体技术差异，因此它同样不适合设一个全体运动员统一“最佳角”。[27]
+这也说明：
+单机位 2D YOLO 对跳高是不够完整的。
+因为髋—肩分离本身就是明显的三维旋转动作。论文使用多个高速机位做 3D 分析，而不是单纯一个侧面相机。[28]
+#国内中文研究也给出了很有价值的数据
+张志铭对 4 名当时台湾男子优秀背越式跳高运动员进行了三维运动学与动力学分析，运动员个人最好成绩均超过 2 m；研究使用两台高速电子摄像机、两台 VHS 摄像机与 Kistler 测力板，高速影像分析达到 125 fps、力板 250 Hz。研究报告起跳过程中垂直力可达到约体重的 2–7 倍，并指出国内运动员与国外优秀运动员相比，在助跑速度、最后两步和起跳转换等方面存在差异。[29]
+论文入口：
+《國內優秀背向式跳高選手運動生物力學分析》
+另一篇 2022 年中文原始研究分析了 16 名女子跳高运动员，发现相较世界级女子运动员，该组运动员表现出较低助跑速度、水平→垂直速度转换较弱、起跳阶段膝屈曲更多、离地时水平速度较大但垂直速度较小，以及起跳角偏小。[30]
+论文入口：
+《女子跳高選手助跑最後兩步與起跳動作之運動學分析》
+对你的系统，这意味着“跳得好”不应该只看：
+knee_angle
+而应该看：
+runup_velocity
+penultimate_step
+last_flight_time
+TD configuration
+CM-foot distance
+knee compression
+ankle compression
+contact_time
+TO vertical velocity
+takeoff angle
+hip-shoulder separation
+#核心论文、机构与可直接训练的知识
+下面这张表是我认为与你项目直接相关程度最高的一批原始研究和官方比赛生物力学报告。
+--- TABLE ---
+作者 / 年份 | 机构 / 数据来源 | 对象 | 对你的项目最重要的结果 | 可直接用于训练的标签 | 网址
+Mattes et al., 2021 | German Track & Field / 高水平短跑研究 | 26 名精英男子短跑运动员 | 最大速度跑 TD/TO/摆动期完整关节角，速度与髋伸角速度、脚向后速度、触地时间等相关 | TD、TO、min knee、max knee lift、GCT、角速度 | 全文 [31]
+Miyashiro et al., 2019/2020 | 日本短跑生物力学研究 | 79 名男子短跑运动员 | 运动学应由速度、腿长、步频等共同解释 | personalized reference、残差评分 | 全文 [12]
+Bezodis 等相关高水平起跑研究, 2017 | Sprint-start biomechanics | 快、慢高水平短跑运动员 | 快组前后起跑器作用力分配差异更小 | block push、前/后腿贡献 | 全文 [13]
+后膝角起跑实验 | Sprint start laboratory biomechanics | 短跑运动员 | 比较 90°、115°、135° rear-knee set positions；90°有利于后腿 push action | Set-position rear knee angle | 全文 [14]
+Morin/Rabita 等 acceleration biomechanics | Sprint acceleration biomechanics | 高水平短跑 | hamstrings / hip extensors 与水平力生成密切相关 | hip extension、后拉速度、水平推进代理变量 | 全文 [15]
+Heiderscheit et al., 2011 | University of Wisconsin | 45 名健康跑者 | ±5/±10% 步频改变步长和膝髋机械负荷 | cadence、step length、knee flexion、loading | 全文 [32]
+Lenhart et al., 2014 | Running biomechanics | 30 名健康成人 | 110% preferred step rate 条件下峰值髌股关节力约降14% | cadence → load risk model | 全文 [24]
+Hanley et al., 2020 | Leeds Beckett / World Athletics 世界锦标赛 | 56 名世界级马拉松选手 | IC、midstance、TO、midswing 的髋膝踝肩肘数据；RFS/NRFS差异 | 长跑 phase-conditioned angle database | 全文 [33]
+Nicholson et al., 2024 | Leeds Beckett + World Athletics | 世界级男子跳高成功/失败同高度尝试 | TD 比 TO 更能区分成功失败；水平速度、CM-foot距离、contact time、摆动腿配置显著不同 | 直接做 success/failure supervision | 全文 [3]
+Nicholson et al., 2022 | Leeds Beckett / World Athletics | 29 名世界级跳高运动员 | Hip–Shoulder separation 与跳高三维旋转策略相关 | H-S separation、trunk rotation | 全文 [27]
+Ae et al., 2008 | World Athletics / 日本运动生物力学团队 | 2007 世锦赛前三名男子跳高运动员 | 世界顶级跳高助跑、起跳、3D 技术模型 | elite reference template | World Athletics PDF [34]
+World Athletics Berlin Sprint Report | World Athletics Research Centre | 2009 世界锦标赛短跑 | 世界级比赛生物力学原始技术报告 | 分段速度、步长、步频、event data | 官方 PDF [35]
+张立羣等, 2022 | 国立台湾体育运动大学 | 16 名女子跳高运动员 | 最后两步、起跳阶段及与世界级运动员的差异 | 中文样本、膝屈曲、速度转换、take-off angle | 论文 [30]
+张志铭, 1993 | 台湾师范大学运动生物力学实验室 | 4 名男子优秀跳高选手 | 3D+力板，起跳垂直力约2–7 BW | force–pose关联、起跳事件 | 论文 [36]
+--- /TABLE ---
+此外，World Athletics Research Centre 官方还保留了大量世锦赛生物力学研究报告，包括 sprint、high jump、marathon 等项目，可以作为你后续扩充精英运动员 reference database 的源头。[37]
+World Athletics Research Centre：
+World Athletics Research Centre / Research Documents
+女子马拉松 2017 世界锦标赛官方报告：
+World Athletics – Women’s Marathon 2017 Biomechanical Report [38]
+#公开数据集：最适合你训练的十个资源
+这是本次研究中对你项目最有价值的一部分。
+#数据集对比
+--- TABLE ---
+数据集 | 样本规模 | 标注 / 传感器 | 视频 / 采样 | 是否包含目标运动 | 许可 / 获取 | 对你最有价值的用途
+AthletePose3D | 约1.3M帧，165K独立姿态，12类运动 | 2D/3D pose，COCO/H36M格式，camera params，YOLOv8 detection results | 高速运动数据 | Running、Track & Field | 仅非商业科学研究 | 与你现有 YOLO 管线最匹配；可直接做 sports fine-tuning [39]
+AthleticsPose | 23名运动员，约500K帧，62.5K姿态 | 83 joints；可转 COCO/H36M；8机位 | 30/60 fps | Starting dash、Sprint、Distance Running 等 | CC BY-NC-SA 4.0；当前不公开原始视频 | 目标项目匹配度最高的3D运动学数据 [40]
+BioCV | 15人 | 9视角视频 + 42 marker mocap + force plate + camera calibration | 视频200 fps；mocap 200 Hz；force plate 1000 Hz | Running、Jumping、Walking、Hopping | 免费但需申请并接受伦理使用条款 | 视觉→真实关键点→地面反作用力的黄金验证集 [41]
+AddBiomechanics 1.0 | 273人，>70 h，>24M帧 | optical markers、GRF/GRM、joint kinematics、joint torque、COM | 原始数据集采样条件多样 | 含 running、jumping 等大量运动 | CC BY 4.0 | 从姿态进一步学习发力/力矩最重要的数据集 [42]
+SportsPose | >176K 3D poses，24人，5种运动，7视角 | 3D pose；并与商业 marker mocap 验证 | 动态运动；多视角 | 体育运动，但不专门针对跑跳高 | 免费 academic use，需邮件申请 | 训练高速动态人体 3D Pose；论文报告平均验证误差约34.5 mm [43]
+MoVi / BML-MoVi | 90人；20个预定义动作+自选动作 | optical mocap + 多视角 video + IMU + 3D meshes | 约9h mocap、17h video、6.6h IMU | 含 sports movements | 下载前接受 BML-MoVi 数据许可 | 多模态动作建模与 video→3D/IMU 研究 [44]
+AMASS | >300人、>40h、>11,000 motions | 统一 SMPL/SMPL-H 人体模型 / 3D motion | 多个 mocap 数据集汇总 | 包含大量 locomotion / sports motion | 注册；非商业科学研究许可 | 训练人体运动先验、时序3D姿态模型 [45]
+Human3.6M | 3.6M poses、11人、4视角 | 3D pose + multi-view images | 约50 fps | 非运动专项 | 注册获取，使用条件以官网协议为准 | 3D pose 基础预训练；不建议作为运动技术标准 [46]
+3DPW | 约 51K frames / 49K poses；官方含多段户外序列 | 视频 + IMU辅助3D body pose / SMPL | 约30 fps | 非运动专项，真实户外 | 非商业科学研究 | 提升真实场景、衣服、视角变化鲁棒性 [47]
+CMU Motion Capture Database | 大型 subject/motion 分类数据库 | optical mocap，ASF/AMC等 | 各采集序列 | 有 walking、running、sports 等类别 | 官方明确 free for all uses | 动作时序预训练、跑步周期 motion prior [48]
+--- /TABLE ---
+#最优先下载：AthletePose3D
+官网：
+https://github.com/calvinyeungck/AthletePose3D
+论文：
+https://arxiv.org/abs/2503.07499
+它对你特别友好，因为官方仓库已经提供：
+video.mp4
+motion .npy
+COCO keypoints
+Human3.6M keypoints
+2D annotations
+3D annotations
+camera parameters
+YOLOv8 detected results
+官方仓库报告约 130 万帧、16.5 万独立姿态，并明确针对高强度、高速度运动；它甚至已经提供 YOLOv8 detection result，非常适合与你目前的 YOLO 关键点管线对接。[49]
+值得注意的是，官方 2025 年曾修正 running motion 某一机位的 3D 预处理错误，因此下载时必须使用最新修正版数据，而不要使用早期镜像。[49]
+#目标匹配度最高：AthleticsPose
+项目：
+https://github.com/SZucchini/AthleticsPose
+论文：
+https://arxiv.org/abs/2507.12905
+数据包含：
+Starting Dash
+Sprint
+Distance Running
+Race Walking
+Hurdle
+Shot Put
+Discus
+Javelin
+共有 23 名运动员、83 个三维关节点、约 50 万帧；Sprint 和 Distance Running 正好与你的两个跑步任务直接重合。[11]
+它还有一个非常重要的结果：在真实田径运动数据上训练的 3D 姿态模型相比通用/模拟动作数据，在真实田径动作上的误差显著下降；这说明你不能只拿 COCO/Human3.6M 训练完就直接做短跑技术分析，必须进行 athletics-domain fine-tuning。[50]
+但当前仓库明确表示暂不发布原始视频文件，所以它更适合训练 3D motion/kinematic model，而不是作为 YOLO 原始图像数据的唯一来源。[51]
+#对你的科研价值最高：BioCV
+下载：
+https://researchdata.bath.ac.uk/1258/
+论文：
+https://www.nature.com/articles/s41597-024-04077-3
+这是我认为你的项目一定值得申请下载的数据集。
+因为同一动作同时拥有：
+9-camera HD RGB video @ 200 fps
++
+15-camera optical motion capture @ 200 Hz
++
+4 Kistler force plates @ 1000 Hz
++
+3D marker ground truth
++
+camera intrinsic/extrinsic
++
+photogrammetry body scans
+而动作本身包含 running、jumping、countermovement jump、walking、hopping。[52]
+这意味着你可以做非常漂亮的一条科研 pipeline：
+然后与：
+比较误差，再进一步学习：
+BioCV 甚至提供校准参数，因此可以从多个二维视角重建三维关键点。[41]
+#真正解决“姿态代表什么发力”：AddBiomechanics
+下载：
+https://addbiomechanics.org/download_data.html
+官方项目：
+https://addbiomechanics.org/
+其 1.0 版本包含 273 名受试者、70 小时以上动作、2400 万帧以上，每帧可以包含：
+marker positions
+ground reaction force
+ground reaction moment
+joint kinematics
+joint torque
+center-of-mass kinematics
+[53]
+而且上传数据自动采用 CC BY 4.0，这一点对科研训练和数据再利用非常友好。[54]
+它非常适合你未来做：
+或者：
+这一步才是真正把“动作姿态”与“发力”连接起来。
+#怎样建立你真正需要的“好/坏姿态标准”
+这里是我认为你项目最终应该采用的评价体系。
+#不建立一个“万能最佳角度”
+例如不能写：
+if knee_angle < 150:
+    bad_pose = True
+因为同一个膝角：
+在短跑 touchdown；
+短跑最大膝抬高；
+长跑 midstance；
+跳高起跳腿 touchdown；
+跳高支撑期最大屈曲；
+代表的是完全不同的生物力学状态。世界级短跑最大速度 touchdown 的膝角大约在 156° 左右，而世界级马拉松 midstance 大约只有 131°；跳高起跳 touchdown 又有另一套范围。[55]
+#第一层：事件分类
+你的第一个模型应该输出：
+Sprint:
+SET
+BLOCK_EXIT
+ACCELERATION_CONTACT
+MAX_SPEED_TO
+MAX_KNEE_FLEXION
+MAX_KNEE_LIFT
+PRE_CONTACT
+TOUCHDOWN
+MIDSTANCE
+TOE_OFF
+
+Distance:
+INITIAL_CONTACT
+MIDSTANCE
+TOE_OFF
+MIDSWING
+
+High Jump:
+PENULTIMATE_CONTACT
+FINAL_FLIGHT
+TAKEOFF_TOUCHDOWN
+MAX_COMPRESSION
+TAKEOFF_TOE_OFF
+APEX
+BAR_CLEARANCE
+LANDING
+#第二层：参考分布而不是硬阈值
+例如世界级最大速度短跑 touchdown：
+那么工程上你可以先构造：
+例如：
+|z| <= 1       → 位于该参考样本常见区域
+1 < |z| <= 2   → 偏离精英参考
+|z| > 2        → 明显离群，需要进一步分析
+但这里必须特别强调：
+±1 SD / ±2 SD 是我建议你的工程统计分层，不是论文公布的“运动员合格/不合格医学阈值”。
+这样不会伪造运动科学标准。
+#第三层：加入速度和人体尺寸
+更合理的是：
+尤其短跑已经有研究证据表明速度、腿长、步频和摆支比会影响合理的运动学模式。[12]
+因此你的数据表应该类似：
+--- TABLE ---
+event | speed_band | level | sex | feature | mean | SD
+sprint_TD | 10–11m/s | elite | male | knee_angle | 156 | 6
+sprint_TD | 10–11m/s | elite | male | hip_angle | 147 | 8
+marathon_IC | WC | male | male | knee_angle | 149 | 4
+marathon_midstance | WC | male | male | knee_angle | 131 | 4
+highjump_TD_success | WC | elite male | male | knee_angle | 162.77 | 5.69
+--- /TABLE ---
+这些文献可以为你的第一版 reference database 提供初始化。[56]
+#第四层：真正的“好坏”必须有结果标签
+最理想的模型不是：
+而是：
+#短跑
+或者：
+然后根据哪些技术变量预测更快成绩，再解释“哪里可以改善”。
+#长跑
+可以分别建立：
+而不要强行把所有东西压缩成“跑姿评分”。
+#跳高
+这里最容易：
+因为 Nicholson 2024 已经直接提供成功/失败动作设计。[3]
+进一步可以：
+这样得到的评分才是真正和运动成绩有关系的评分。
+#第五层：把发力预测独立出来
+你将来甚至可以建立：
+YOLO Pose
+      ↓
+2D/3D Pose Sequence
+      ↓
+velocity / acceleration
+      ↓
+Biomechanics Network
+      ↓
+GRF / joint torque / power
+训练数据主要来自：
+BioCV + AddBiomechanics
+因为它们提供了姿态/运动学与力板/动力学同步信息。[57]
+最终你的系统可以从：
+“你的膝盖角度是 151°。”
+升级为：
+“在最大速度阶段 touchdown 时，你的支撑膝相对于同速度等级精英参考更屈曲；随后支撑期又产生较大的膝 ROM，并伴随较长的 contact time。这一组合不同于该精英参考样本中更高速运动员常见的较短接触和较小支撑期膝活动范围。”
+这才是真正具有运动科学意义的 AI 教练输出。[8]
+#优先下载清单与实际项目路线
+#最优先的十篇论文和报告
+--- TABLE ---
+优先级 | 资源 | 为什么先下载 | 直接网址
+★★★★★ | Nicholson 2024 — High Jump Successful vs Unsuccessful | 最接近“好/坏姿态 ground truth” | Frontiers 全文 [3]
+★★★★★ | Mattes 2021 — Elite Maximal Sprint | 短跑完整关键事件+关节角+速度关系 | PMC全文 [58]
+★★★★★ | Hanley 2020 — World Championship Marathon | 长跑 IC/Midstance/TO/Midswing 标准数据 | PMC全文 [59]
+★★★★★ | Miyashiro — Individualized Sprint Kinematics | 给你建立个体化评分模型 | PMC全文 [12]
+★★★★☆ | Nicholson 2022 — Hip-Shoulder Separation in High Jump | 三维旋转/过杆技术 | Frontiers全文 [27]
+★★★★☆ | Heiderscheit 2011 — Step Rate Manipulation | 跑姿与关节负荷关系 | PMC全文 [32]
+★★★★☆ | Lenhart 2014 — Step Rate & Patellofemoral Force | 将姿态、步频与关节力连接 | PMC全文 [24]
+★★★★☆ | Sprint Start Faster vs Slower | 起跑好坏分析 | PMC全文 [13]
+★★★★☆ | World Athletics 2007 High Jump Top Three | 世界级跳高精英技术模板 | 官方PDF [34]
+★★★★☆ | World Athletics Berlin Sprint Biomechanics | 世界锦标赛级短跑比赛数据 | 官方PDF [35]
+--- /TABLE ---
+中文资料建议额外保存：
+女子跳高選手助跑最後兩步與起跳動作之運動學分析 [30]
+國內優秀背向式跳高選手運動生物力學分析 [36]
+#最优先的十个数据集
+--- TABLE ---
+优先级 | Dataset | 下载入口 | 你拿它做什么
+★★★★★ | AthletePose3D | GitHub / Download | YOLO sports pose fine-tuning；2D→3D；跑步/田径数据 [49]
+★★★★★ | BioCV | Bath Research Data | 200fps 视频 + 真值MoCap + 1000Hz力板 [41]
+★★★★★ | AthleticsPose | GitHub | Sprint / Distance Running / Starting Dash 真实田径3D姿态 [40]
+★★★★★ | AddBiomechanics 1.0 | Download | 姿态→GRF / joint torque / power [60]
+★★★★☆ | SportsPose | 官方Download | 高动态体育 3D pose fine-tuning [61]
+★★★★☆ | MoVi | 官方项目 | 视频+MoCap+IMU 时序模型 [62]
+★★★★☆ | AMASS | 官方Download | 大规模人体运动先验 / 3D 时序预训练 [63]
+★★★☆☆ | Human3.6M | 官网 | 基础3D pose预训练，不作为运动技术标准 [64]
+★★★☆☆ | 3DPW | 官网 | 真实户外场景 + IMU 3D泛化 [65]
+★★★☆☆ | CMU MoCap | 官网 | running / locomotion motion prior；免费使用 [66]
+--- /TABLE ---
+COCO 仍然适合你做 YOLO 人体关键点基础预训练，因为官方数据包含约 250,000 个具有关键点标注的人体实例；但它的主要作用应该是“让模型找到人体关节”，而不是“告诉模型什么叫优秀短跑技术”。[67]
+COCO 官网
+OpenPose/MMPose 本质上同样需要依靠这些姿态数据进行训练或微调。值得注意的是，AthleticsPose 的研究本身就是使用 ViTPose + MMPose + COCO pretrained weights 后，再使用田径领域数据进行 fine-tuning，这和你现在 YOLO → sports-specific fine-tuning 的思路高度一致。[11]
+PhysioNet 当前检索到的相关多模态运动数据库更偏向平衡/姿势任务，例如 one-leg stance 的 motion capture + force plate + radar 数据，而不是短跑、长跑、跳高专门动作，因此对你当前三个项目的优先级低于 BioCV 和 AddBiomechanics。[68]
+#最推荐你的训练顺序
+从当前数据资源来看，一条比较合理的路线是：
+--- TABLE ---
+
+--- /TABLE ---
+最后，你的系统里真正应该保存的不是一张“标准角度 Excel”，而是这样一个数据库：
+SPORT
+ ├─ Sprint
+ │   ├─ Start
+ │   ├─ Acceleration
+ │   └─ Max Velocity
+ │        ├─ Toe-off
+ │        ├─ Max Knee Flexion
+ │        ├─ Max Knee Lift
+ │        ├─ Pre-contact
+ │        ├─ Touchdown
+ │        └─ Midstance
+ │
+ ├─ Distance Running
+ │   ├─ Initial Contact
+ │   ├─ Midstance
+ │   ├─ Toe-off
+ │   └─ Midswing
+ │
+ └─ High Jump
+     ├─ Penultimate
+     ├─ Final Flight
+     ├─ Takeoff TD
+     ├─ Max Compression
+     ├─ Takeoff TO
+     ├─ Apex
+     └─ Bar Clearance
+每一个 event 再存：
+hip_angle_mean
+hip_angle_sd
+
+knee_angle_mean
+knee_angle_sd
+
+ankle_angle_mean
+ankle_angle_sd
+
+shoulder_angle_mean
+elbow_angle_mean
+
+joint_ROM
+angular_velocity
+
+contact_time
+flight_time
+step_length
+step_frequency
+
+CM_foot_distance
+trunk_lean
+
+speed
+performance_level
+sex
+leg_length
+
+source_paper
+angle_definition
+camera_fps
+尤其必须把 angle_definition 保存下来，因为不同论文中的踝角、肩角、髋角零点定义并不统一；不进行坐标/角度定义转换，文献数据库即使数字很多，也不能直接用于模型监督。长跑世界锦标赛论文的踝角站立参考约110°、肩角站立为0°就是非常典型的例子。[7]
+还有一个非常实际的工程结论：精英最大速度短跑的地面接触时间约只有 96 ms；如果你的视频只有 30 fps，一次完整支撑期理论上只有大约 3 帧，很难精确区分 touchdown、midstance 与 toe-off。相比之下，世界级跳高研究使用了 120–200 Hz，高质量 BioCV 也提供 200 fps 视频。基于这些时间尺度，短跑和跳高项目优先使用 ≥120 fps 的视频是非常合理的工程选择；30 fps 更适合粗动作识别，而不是精密生物力学事件定位。前一句时间数据来自精英短跑研究，后面的帧数比较是据此作出的工程推论。[69]
+最终，“姿态好坏”的可靠等级可以理解为：
+最高可信度：同运动员成功 vs 失败、或者姿态变量与真实成绩/速度/力板结果直接关联，例如 Nicholson 跳高研究。[3]
+第二等级：世界级运动员的 event-specific 均值和标准差，例如 Mattes 最大速度短跑以及 World Championship Marathon。[70]
+第三等级：大型运动姿态数据学习出来的正常运动分布，例如 AthletePose3D、AthleticsPose。[71]
+第四等级：单独某个教练经验角度或者互联网上的“标准跑姿图片”。这一类不适合直接作为你的 AI 标签。
+所以，对你这个项目而言，真正值得训练的大模型不是一个简单的“人体姿态分类器”，而是一个能够理解：
+的时序运动生物力学模型。从目前公开资源看，AthletePose3D + BioCV + AthleticsPose + AddBiomechanics + World Athletics/Nicholson/Mattes/Hanley 的运动科学规则库，已经足够搭建出这个系统的第一版高质量训练框架。[72]
+[1] [6] [8] [9] [10] [55] [56] [69] [70] Kinematic Stride Characteristics of Maximal Sprint Running of Elite Sprinters – Verification of the “Swing-Pull Technique” - PMC
+https://pmc.ncbi.nlm.nih.gov/articles/PMC8008308/
+[2] [33] [59] Men's and Women's World Championship Marathon ... - PMC
+https://pmc.ncbi.nlm.nih.gov/articles/PMC7739599/?utm_source=chatgpt.com
+[3] [5] [25] Frontiers | Differences in run-up, take-off, and flight characteristics: successful vs. unsuccessful high jump attempts at the IAAF world championships
+https://www.frontiersin.org/journals/sports-and-active-living/articles/10.3389/fspor.2024.1352725/full
+[4] [39] [49] [71] [72] GitHub - calvinyeungck/AthletePose3D: Dataset and Code for CVSports at CVPR 2025 paper "AthletePose3D: A Benchmark Dataset for 3D Human Pose Estimation and Kinematic Validation in Athletic Movements" · GitHub
+https://github.com/calvinyeungck/AthletePose3D
+[7] [18] [19] [20] [21] [22] Frontiers | Men's and Women's World Championship Marathon Performances and Changes With Fatigue Are Not Explained by Kinematic Differences Between Footstrike Patterns
+https://www.frontiersin.org/journals/sports-and-active-living/articles/10.3389/fspor.2020.00102/full
+[11] [40] [50] AthleticsPose: Authentic Sports Motion Dataset on Athletic Field and Evaluation of Monocular 3D Pose Estimation Ability
+https://arxiv.org/html/2507.12905v1
+[12] Kinematics of Maximal Speed Sprinting With Different ... - PMC
+https://pmc.ncbi.nlm.nih.gov/articles/PMC7739839/?utm_source=chatgpt.com
+[13] Biomechanical Differences in the Sprint Start Between Faster and ...
+https://pmc.ncbi.nlm.nih.gov/articles/PMC5384050/?utm_source=chatgpt.com
+[14] THE EFFECTS OF THREE DIFFERENT REAR KNEE ANGLES ...
+https://pmc.ncbi.nlm.nih.gov/articles/PMC4135065/?utm_source=chatgpt.com
+[15] Sprint Acceleration Mechanics: The Major Role of Hamstrings in ... - PMC
+https://pmc.ncbi.nlm.nih.gov/articles/PMC4689850/?utm_source=chatgpt.com
+[16] [42] [53] [60] AddBiomechanics 1.0 Dataset (High Quality Core Data)
+https://addbiomechanics.org/download_data.html?utm_source=chatgpt.com
+[17] Men's and Women's World Championship Marathon ...
+https://www.frontiersin.org/journals/sports-and-active-living/articles/10.3389/fspor.2020.00102/full?utm_source=chatgpt.com
+[23] [32] Effects of Step Rate Manipulation on Joint Mechanics during ...
+https://pmc.ncbi.nlm.nih.gov/articles/PMC3022995/?utm_source=chatgpt.com
+[24] Increasing Running Step Rate Reduces Patellofemoral Joint Forces
+https://pmc.ncbi.nlm.nih.gov/articles/PMC3925193/?utm_source=chatgpt.com
+[26] [27] The Association Between Hip-Shoulder Separation Angles ...
+https://www.frontiersin.org/journals/sports-and-active-living/articles/10.3389/fspor.2022.873526/full?utm_source=chatgpt.com
+[28] The Association Between Hip-Shoulder Separation Angles ...
+https://www.frontiersin.org/journals/sports-and-active-living/articles/10.3389/fspor.2022.873526/pdf?utm_source=chatgpt.com
+[29] [36] 國內優秀背向式跳高選手運動生物力學分析 - 華藝線上圖書館
+https://www.airitilibrary.com/Article/Detail/10247297-199307-x-15-239-261-a?utm_source=chatgpt.com
+[30] 女子跳高選手助跑最後兩步與起跳動作之運動學分析
+https://www.airitilibrary.com/Article/Detail/P20150107002-202203-202204010013-202204010013-45-58?utm_source=chatgpt.com
+[31] [58] Kinematic Stride Characteristics of Maximal Sprint Running of ...
+https://pmc.ncbi.nlm.nih.gov/articles/PMC8008308/?utm_source=chatgpt.com
+[34] Biomechanical analysis of the top three male high jumpers ...
+https://worldathletics.org/download/downloadnsa?filename=a16467ca-9765-441e-a668-a61cbbe2a90e.pdf&urlslug=biomechanical-analysis-of-the-top-three-male&utm_source=chatgpt.com
+[35] Cover Biomechanics WC 2009
+https://worldathletics.org/download/download?filename=76ade5f9-75a0-4fda-b9bf-1b30be6f60d2.pdf&urlslug=1+-+Biomechanics+Report+WC+Berlin+2009+Sprint+Men&utm_source=chatgpt.com
+[37] Research Centre | Official Documents
+https://worldathletics.org/about-iaaf/documents/research-centre?utm_source=chatgpt.com
+[38] [PDF] Biomechanical report - World Athletics
+https://worldathletics.org/download/download?filename=7ab50922-8566-45d7-b9eb-3c1cb3e0643b.pdf&urlslug=Women%27s+marathon+-+2017+IAAF+World+Championships+Biomechanical+report&utm_source=chatgpt.com
+[41] [52] [57] BioCV Motion Capture Dataset - University of Bath Research Data Archive
+https://researchdata.bath.ac.uk/1258/
+[43] SportsPose -- A Dynamic 3D sports pose dataset
+https://arxiv.org/abs/2304.01865?utm_source=chatgpt.com
+[44] MoVi: A large multi-purpose human motion and video dataset
+https://pmc.ncbi.nlm.nih.gov/articles/PMC8211257/?utm_source=chatgpt.com
+[45] [63] AMASS
+https://amass.is.tue.mpg.de/
+[46] [64] Human3.6M Dataset - IMAR
+https://vision.imar.ro/human3.6m/?utm_source=chatgpt.com
+[47] [65] 3D Poses in the Wild Dataset - Real Virtual Humans
+https://virtualhumans.mpi-inf.mpg.de/3DPW/license.html?utm_source=chatgpt.com
+[48] [66] Carnegie Mellon University - CMU Graphics Lab - motion capture library
+https://mocap.cs.cmu.edu/?utm_source=chatgpt.com
+[51] GitHub - SZucchini/AthleticsPose: Authentic Sports Motion Dataset on Athletic Field · GitHub
+https://github.com/SZucchini/AthleticsPose
+[54] Terms of Service - AddBiomechanics
+https://addbiomechanics.org/data_sharing_mission.html?utm_source=chatgpt.com
+[61] SportsPose - A Dynamic 3D sports pose dataset
+https://christianingwersen.github.io/SportsPose/download.html
+[62] BML-MoVi – BioMotionLab
+https://www.biomotionlab.ca/movi/?utm_source=chatgpt.com
+[67] COCO - Common Objects in Context
+https://cocodataset.org/?utm_source=chatgpt.com
+[68] Multimodal Synchronized Motion Capture, Force Plate, and ...
+https://physionet.org/content/olst-mocap-forceplate-radar/1.0/?utm_source=chatgpt.com
+
+================================================================================
+FILE: D:\KineForm\跑步与跳高运动姿态分析：可量化生物力学基准、关键论文与开放数据集研究报告.docx
+================================================================================
+#跑步与跳高运动姿态分析：可量化生物力学基准、关键论文与开放数据集研究报告
+#Executive Summary
+针对你的 YOLO 人体关键点 → 骨架连线 → 关节角度 → 姿态质量判断 → 大模型训练 这一技术路线，本次检索最重要的结论是：短跑、长跑/中长跑、跳高都不存在一个由 ACSM、NSCA、IOC 或 World Athletics 统一颁布的“某个膝角超过 X° 就是坏动作”的通用评分表。 顶级运动员之间存在明显的个体形态、速度、技术和落地方式差异，因此真正适合计算机视觉系统的标准，不应是单个固定角度，而应是“项目 × 阶段 × 速度 × 关节 × 时间点”条件化后的参考区间/参考曲线。最大速度短跑的大样本研究甚至专门指出，腿长、步频和摆动/支撑时间比例会系统性影响关节运动学，因此单一角度阈值会把正常的个体差异误判为技术错误。[1]
+对你的项目而言，最值得优先使用的几组“硬标准”是：
+--- TABLE ---
+项目/阶段 | 可直接作为第一版模型 reference envelope 的指标
+最大速度短跑 | 德国高水平短跑运动员：步频 4.22–5.00 step/s，平均 4.56±0.22 Hz；接触时间 85–110 ms，平均 96±7 ms；步长 2.07–2.51 m。触地时髋约 147±8°、膝约 156±6°、踝约 127±7°；离地时髋约 181±5°、膝 155±7°、踝 147±7°。[2]
+短跑起跑 | 经典起跑生物力学文献常见“Set”参考约为前腿膝角 90°、后腿约 130°；这应理解为传统起跑基准，而不是人人必须达到的硬阈值。[3]
+800 m 世界级女子 | 第一圈到第二圈速度约 23.25→24.65 km/h，步频 3.29→3.52 Hz；冲刺冠军第二圈可到约 3.82 Hz≈229 step/min；加速时初触地膝约多屈曲 5°、踝约多跖屈 3°，小腿触地角从约 7°降到4°，更接近垂直。[4]
+跳高最后起跳 | 2017 世界锦标赛男子决赛样本：起跳脚接触 0.14–0.19 s；触地膝角 161–170°，最大屈膝后约 124–140°，离地 167–178°；踝触地 113–130°、最低约 89–119°、离地 125–155°；离地垂直速度约 4.52–4.98 m/s，合速度 5.87–6.79 m/s，起跳角 44–53°。[5]
+跳高发力时序 | 同一世界级样本中，最后一次支撑的膝屈曲阶段约 0.08–0.13 s，随后的伸展阶段约 0.06–0.08 s；另一力台研究的 9 名男子起跳接触平均 0.197±0.020 s，垂直 GRF 1170–4110 N。[6]
+短跑 EMG | 股二头肌（BF）在触地前的末摆期以及支撑早期非常关键；末摆期 BF 激活与离心膝屈肌能力共同解释更高的水平 GRF。实验还指出，约 50 ms 的肌电—力学延迟意味着，只有在触地后才开始激活腘绳肌已经太晚。[7]
+--- /TABLE ---
+对于原始训练数据，目前最值得你立即下载的是四套：
+Van Hooren & Meijer 2024：19 人、13 种跑步条件、Vicon + 力台跑台 + 11 肌 sEMG，同时提供 C3D、GRF、关节角度、关节力矩、肌力和关节接触力。对你的“姿态 → 力/力矩/EMG”跨模态学习价值最高。[8]
+https://osf.io/7qbxc/
+Fukuchi et al.：39 人原始/处理后 C3D/TXT，2.5、3.5、4.5 m/s，运动学 + 动力学，CC BY 4.0，非常适合构建“速度条件化正常跑姿曲线”。[9]
+https://figshare.com/articles/dataset/A_comprehensive_public_data_set_of_running_biomechanics_and_the_effects_of_running_speed_on_lower_extremity_kinematics_and_kinetics/4543435
+AddBiomechanics 1.0：273 人、70+ 小时、超过 2400 万帧，包含 marker、GRF、关节运动学、逆动力学关节力矩和 COM；CC BY 4.0。它不是专门短跑/跳高数据集，但非常适合作为你的 biomechanical foundation model 预训练库。[10]
+https://addbiomechanics.org/download_data.html
+Mei et al. 2022 距离跑数据集：20 名休闲跑者，在 5 km 跑前后采集 C3D + GRF，并公开关节角度、关节力矩和关节/肌骨模型相关力数据；尤其适合研究“疲劳前后姿态质量变化”。[11]
+https://auckland.figshare.com/projects/Dataset_of_Lower_Extremity_Joint_Angles_Moments_and_Forces_in_Distance_Running/136708
+最关键的工程建议是：不要训练一个简单的 good/bad 二分类器。更适合的是先训练模型识别 sport → phase → event，再对每个关键事件输出 joint-angle deviation + timing deviation + symmetry deviation + estimated kinetic deviation。最终“好坏”评分是这些偏差的组合。这比“一帧姿态分类”更符合真正的运动生物力学。短跑接触只有约 85–110 ms，所以 30 fps 视频通常只有约 3 帧落在支撑期；你的正式采集最好至少 120 fps，理想为 240 fps，尤其是短跑和跳高。短跑研究使用 200–300 Hz 视频、世界杯/锦标赛研究也采用高帧率分析，说明高速动作的时序本身就是重要信息。[12]
+#证据框架与“姿态好坏”应该怎样定义
+#不要直接把论文角度复制到 YOLO，先统一角度定义
+这是这个项目最容易出错的地方之一。不同论文中的“膝角 30°”可能表示膝屈曲角，也可能表示由髋—膝—踝三点形成的内部夹角 150°。例如世界田联高跳报告的膝角定义是接近 180° 为完全伸直；Mattes 的短跑研究同样直接以身体节段之间的几何角描述，因此触地膝角约 156°。[13]
+建议你的 YOLO 系统统一保存两套量：
+其中完全伸直约为 180°；同时保存：
+这样：
+knee_internal_angle = 156°
+就等价于
+knee_flexion = 24°
+踝角建议定义为 knee–ankle–toe 三点夹角；髋角则必须明确你使用的是 shoulder/torso–hip–knee 的内部角，还是论文中的 anatomical hip flexion/extension angle。不同定义绝对不能直接混用。Mattes 等人的二维高速视频角度测量估计角度误差约为 ±1.5°，这也可以作为你自己标注系统的一项目标误差参考。[14]
+#推荐把一个完整动作拆成“事件”，而不是等间隔抽帧
+对于短跑，一个周期至少可以标成：
+--- TABLE ---
+
+--- /TABLE ---
+Mattes 的实验模型实际上就是依据 toe-off、最大髋角、最小膝角、最大抬腿、最大膝角、touchdown 和下一次 toe-off 等关键位置建立技术特征，而不是只看一个“漂亮姿势”。[15]
+长跑则建议至少使用：
+Initial Contact → Loading/Early Stance → Mid-Stance → Propulsion → Toe-off → Early Swing → Mid-Swing → Terminal Swing → Initial Contact
+跳高应单独建模：
+倒数第三步 → 倒数第二步 → 最后一步 → 起跳脚 touchdown → 最大膝屈/最低COM → 最大伸展 → toe-off → 腾空上升 → 过杆峰值 → 落垫
+#目前没有真正通用的“姿态优/良/差”国际评分量表
+在本次检索到的 World Athletics、ACSM 相关期刊、NSCA 文献以及大学生物力学研究中，没有发现针对“100 m/长跑/跳高视频姿态”已经被普遍验证的、类似考试评分表一样的统一角度打分体系。相反，最大速度短跑研究强调了腿长、速度、步频与摆动/支撑比例的个体影响；同样速度下，腿长本身就能显著改变正常的关节运动模式。[16]
+因此，你可以建立一个工程评分标准，但必须把它标记为“基于文献参考分布构造”，而不是声称它是 ACSM/World Athletics 官方评分：
+可建立：
+--- TABLE ---
+等级 | 推荐定义 | 科学含义
+Reference-like |  | 接近该条件参考样本主体
+Acceptable variation |  | 个体差异区
+Atypical |  | 应重点检查
+Performance-linked alert | 偏离方向同时与性能负相关 | 优先级最高
+--- /TABLE ---
+这里的 ±2 SD 可以作为统计参考而不是“坏动作阈值”；最大速度短跑的大样本建模研究本身就用 ±2 SD/±2 SEE 表示约 95% 的现实变化范围。[17]
+更好的最终评分形式是：
+其中不同项目权重不同：短跑应提高 timing/kinetic 权重，长跑应提高周期稳定性/对称性权重，跳高应提高最后两步 + 起跳全过程权重。 这是根据现有证据设计的工程框架，而不是现成的官方量表。
+#短跑：起跑、加速与最大速度阶段
+#可量化的关节与时空参考
+最实用的一篇是 Klaus Mattes、Stefanie Wolff、Shahab Alizadeh 发表的 “Kinematic Stride Characteristics of Maximal Sprint Running of Elite Sprinters – Verification of the ‘Swing-Pull Technique’”，2021 年，University of Hamburg / Journal of Human Kinetics。研究对象为 26 名德国高水平短跑运动员，在最大速度飞跑中达到 10.1–11.3 m/s。[18]
+论文全文：
+https://pmc.ncbi.nlm.nih.gov/articles/PMC8008308/
+其时空指标非常适合直接转换成你的第一版 reference：
+--- TABLE ---
+指标 | 平均±SD | 95% CI | 实测范围 | 模型意义
+最大速度 | 10.6±0.4 m/s | 10.4–10.7 | 10.1–11.3 | 输入条件
+步长 | 2.32±0.11 m | 2.28–2.37 | 2.07–2.51 | 不宜单独越大越好
+步频 | 4.56±0.22 Hz | 4.46–4.64 | 4.22–5.00 | 约253–300 step/min
+接触时间 | 96±7 ms | 93–99 | 85–110 | 关键质量指标
+腾空时间 | 124±7 ms | 121–127 | 110–140 | 与步长耦合
+--- /TABLE ---
+更快的速度与更长步长相关 ，与更短接触时间相关 ，但在该样本中并没有与步频形成显著相关。因此，“短跑越快必须越高步频”不能直接作为好坏规则。[2]
+其关键帧角度：
+--- TABLE ---
+阶段 | 髋 | 膝 | 踝 | 可用于 YOLO 的解释
+离地 Toe-off | 181±5° | 155±7° | 147±7° | 后腿离地伸展姿态
+最大膝屈摆腿 | — | 40±8° | — | 小腿快速折叠
+最大抬腿 | — | 85±7° | — | 膝开始展开
+触地前最大膝角 | — | 154±10° | — | 主动向下/向后摆
+Touchdown | 147±8° | 156±6° | 127±7° | 高价值关键帧
+支撑期膝角变化 | — | 屈曲约 7°；伸展约 14° | — | “支撑腿过度塌陷”特征
+支撑期踝角变化 | — | — | 屈曲约 24°；伸展约 42° | 弹性支撑/推进
+--- /TABLE ---
+更快的运动员表现出较小的支撑期膝屈曲幅度 、更快的触地前髋伸展角速度 、更大的脚部垂直回摆速度 ，且触地踝角也与速度相关。[19]
+这里特别值得你加入一个：
+support_knee_collapse = knee_angle_touchdown - min_knee_angle_during_stance
+它比单独看触地膝角更有意义。“触地后膝盖塌多少”是动态特征，“触地那一帧是多少度”只是静态特征。
+#最大速度短跑应使用条件化回归，而不是固定角度
+K. Miyashiro、R. Nagahara 等对 79 名男子短跑运动员进行 40–50 m 最大速度分析，100 m PB 为 10.30–12.14 s。论文给出了一个对你的 AI 系统极其有价值的思路：直接根据速度、腿长、步频、摆动/支撑时间比预测正常运动学。[1]
+论文：Kinematics of Maximal Speed Sprinting With Different Running Speed, Leg Length, and Step Characteristics
+https://pmc.ncbi.nlm.nih.gov/articles/PMC7739839/
+例如步频模型为：
+其中 RS = running speed (m/s)，LL = leg length (m)。[17]
+摆动/支撑比：
+而膝触地角甚至可以建成：
+其 SEE 约 5.21°。[20]
+这非常适合作为你的“AI 教练”逻辑：
+不问“膝角是不是 156°”，而问：“对于这个人的腿长、当前速度、步频和摆支比，预测值应该是多少，他实际偏离多少度？”
+这比固定阈值科学得多。
+#起跑阶段
+Harland 与 Steele 的经典综述 Biomechanics of the Sprint Start，Sports Medicine，1997 年，是短跑起跑研究的重要基础文献。传统 medium block spacing 常见 Set 姿态约为：
+前腿膝角：约 90°
+后腿膝角：约 130°
+但后续研究强调起跑位置与人体形态、力量和个人起跑策略有关，不能把这两个数字当成绝对“合格线”。[3]
+检索入口：
+https://pubmed.ncbi.nlm.nih.gov/?term=Biomechanics+of+the+sprint+start+Harland+Steele
+Bezodis 等 2019 的 The Biomechanics of the Track and Field Sprint Start: A Narrative Review 则系统总结了起跑器阶段的髋、膝、踝及肩部动力学，并指出髋关节角速度、后腿髋伸展范围等与 block power 存在关系。[21]
+全文：
+https://pmc.ncbi.nlm.nih.gov/articles/PMC6684547/
+因此建议你的起跑模型至少采集：
+set_frame → gun/reaction → rear_block_off → front_block_off → first_touchdown → first_toeoff → second_touchdown
+重点变量为：
+front_knee_angle_set、rear_knee_angle_set、trunk_angle、hip_height/shoulder_height、block_exit_COM_angle、first_step_contact_time、first_step_shank_angle。
+#短跑关节力矩与发力时序
+Neil Edward Bezodis、Aki Ilkka Tapio Salo、Grant Trewartha 的 Lower limb joint kinetics during the first stance phase in athletics sprinting: three elite athlete case studies，Journal of Sports Sciences，2014 年，使用 1000 Hz 力台 + 200 Hz 视频分析三名精英短跑运动员。[22]
+DOI：
+https://doi.org/10.1080/02640414.2013.849000
+第一步支撑中：
+MTP 和踝关节整个支撑期均表现出跖屈方向的合力矩；
+踝关节产生的能量最多可达到其吸收能量的约 4 倍；
+膝伸肌力矩/功率占据支撑期大部分阶段；
+三名选手中成绩最好者的膝关节能量产生量约为另外两人的 2 倍和4倍；
+髋在整个支撑期持续伸展，早期由髋伸肌正功主导，接近离地时合力矩逐渐转向屈肌主导。[22]
+这个时间结构可以直接转化成你的标签：
+--- TABLE ---
+支撑时间 | 理想需要监控的动力学
+0–约30% stance | 髋伸肌、膝伸肌快速产生功
+早/中支撑 | 踝跖屈肌力矩建立
+中/晚支撑 | 膝伸展 + 踝能量释放
+接近 toe-off | 髋合力矩逐渐转向屈肌方向
+--- /TABLE ---
+需要强调：YOLO 角度不能直接测出力矩。 最合理的方法是用有同步运动学+GRF 的数据集训练：
+而不是从一张图片硬推“发力大小”。
+#短跑 EMG：最值得做成模型特征的肌肉
+Jean-Benoît Morin、Philippe Gimenez、Pascal Edouard、Pierrick Arnal、Pedro Jiménez-Reyes、Pierre Samozino、Matt Brughelli、Jurdan Mendiguchia 的 Sprint Acceleration Mechanics: The Major Role of Hamstrings in Horizontal Force Production，Frontiers in Physiology，2015 年，研究 14 名男性最大加速跑，并同步测量股外侧肌 VL、股直肌 RF、股二头肌 BF、臀大肌等 EMG。[23]
+全文：
+https://pmc.ncbi.nlm.nih.gov/articles/PMC4689850/
+其最值得用于 AI 标签的发现是：
+BF/腘绳肌的关键时段不是只有触地以后，而是末摆期。 水平 GRF 能力与末摆期股二头肌激活以及离心膝屈肌力矩显著相关；高水平水平力输出者能在脚落地前高度激活腘绳肌，然后把脚主动向后送入地面。[24]
+实验中的触地前向后脚速约：
+5.27±0.77 m/s，范围 3.53–6.72 m/s；向后移动距离约 0.244±0.075 m。[25]
+因此非常推荐你的模型增加一个不依赖 EMG 的视觉 proxy：
+即脚踝/脚尖在触地前若干帧相对于骨盆的水平回摆速度。
+它有望成为“是否主动扒地/回摆”的重要姿态动力学代理变量。
+#上肢：肩、肘能用什么阈值
+Paul Macadam 等发表于 NSCA《Strength and Conditioning Journal》 的综述 Role of Arm Mechanics During Sprint Running 指出，上肢短跑定量证据远少于下肢，不能把网络上常见的“肘必须始终 90°”当成科学硬标准。[26]
+文献汇总的早期加速研究中，前两个步态周期可观察到：
+肩屈伸 ROM：第一步约 45.6–52.5°，第二步约 46.4–55.0°
+肘屈伸 ROM：第一步约 53.8–66.3°，第二步约 56.9–67.3°
+早期加速时肱胸关节屈伸角速度可约 700°/s
+不过这些数值部分来自橄榄球/团队运动运动员，因此适合作为上肢运动幅度检测的先验，不适合当世界级田径硬阈值。[26]
+全文入口：
+https://www.researchgate.net/publication/324271038_Role_of_Arm_Mechanics_During_Sprint_Running_A_Review_of_the_Literature_and_Practical_Applications
+上肢对于你的系统，更推荐检测：
+左右肩 ROM 对称度；
+左臂与右腿、右臂与左腿之间的反相位关系；
+最大前摆/后摆时间；
+手是否明显横跨身体中线；
+肩旋转与骨盆旋转之间的相位抵消；
+左右肘 ROM 差值。
+而不是 elbow == 90°。
+#长跑与中长跑：步态、关节角度、经济性与疲劳
+#世界级运动员比赛中的实测基准
+Brian Hanley、Stéphane Merlino、Athanassios Bissas 的 Biomechanics of World-Class 800 m Women at the 2017 IAAF World Championships，Frontiers in Sports and Active Living，2022 年，是极有价值的真实国际比赛研究。研究分析 8 名世界锦标赛 800 m 女运动员，在约 350 m 和 750 m 处使用 150 Hz 视频进行分析。[27]
+全文：
+https://www.frontiersin.org/journals/sports-and-active-living/articles/10.3389/fspor.2022.834813/full
+主要量化结果：
+--- TABLE ---
+指标 | 约350 m | 约750 m / 第二圈 | 含义
+速度 | ≈23.25 km/h | ≈24.65 km/h | 末段加速
+步频 | ≈3.29 Hz | ≈3.52 Hz | 主要通过增加 cadence 提速
+冠军冲刺步频 | — | 可达 ≈3.82 Hz | ≈229 step/min
+小腿初触地角 | ≈7° | ≈4° | 更接近垂直
+膝 | — | 初触地约多屈 5° | 缩短摆动/支撑时间
+踝 | — | 初触地约多跖屈 3° | 更明显前/中足姿态
+--- /TABLE ---
+步长并没有出现与步频类似的大幅变化；第二圈更高 cadence 伴随着更短的触地时间和飞行时间。所有 8 名选手在所分析步态中采用前足着地。[4]
+这里可以直接产生一个中长跑技术变量：
+对于该世界级女子 800 m 样本，冲刺时参考值约 4°，意味着从侧面看，初触地时膝—踝连线几乎垂直。
+不过这不能被泛化成所有马拉松跑者必须 4°。速度越低、后足着地者、不同腿长和鞋类都会改变这个值。世界级马拉松研究也发现后足和非后足落地者在膝、踝等初触地姿态存在系统差异。[28]
+#跑姿与经济性：不要把“180 步频”设成硬标准
+John P. Folland、Sam J. Allen、Michael I. Black、Joseph C. Handsaker、Steph E. Forrester 的 Running Technique is an Important Component of Running Economy and Performance，发表于 ACSM 旗舰期刊 Medicine & Science in Sports & Exercise，2017 年；作者来自 Loughborough University。[29]
+Loughborough 官方仓储：
+https://repository.lboro.ac.uk/articles/journal_contribution/Running_technique_is_an_important_component_of_running_economy_and_performance/9563207
+研究发现跑步技术本身可以解释相当一部分跑步经济性差异；较大的不必要髋/膝屈曲运动以及某些落地几何特征与更差经济性有关。论文也显示健康跑者之间多个膝/髋运动变量本身存在很大的自然跨度，因此同样不支持简单的“一个角度就是最优姿态”。[30]
+Heiderscheit、Chumanov、Michalski、Wille、Ryan 的 Effects of Step Rate Manipulation on Joint Mechanics during Running，Medicine & Science in Sports & Exercise，2011 年，是“步频干预”领域的经典实验。研究并不是让所有人跑到统一 180 step/min，而是在各人自然步频基础上 ±5% 和 ±10%。提高 cadence 会改变髋膝运动和关节机械负荷，说明合理的基准应该是：
+而不是：
+[31]
+这对你的产品非常重要：“180 步频”不要做红绿灯阈值。
+#长跑建议的角度/时序变量
+长跑不存在像高跳最后一跳那样窄的统一角度区间。更合理的是按速度、落地方式分别建立参考曲线。
+你的基础特征至少应该包括：
+--- TABLE ---
+事件 | 髋 | 膝 | 踝 | 上肢/躯干
+Initial Contact | 髋屈角 | 膝屈角 | 踝跖/背屈 | trunk lean、肘角
+Peak Loading | 髋变化 | 最大支撑膝屈 | 最大背屈 | 骨盆下沉
+Midstance | 髋经过中立 | 膝开始伸 | 胫骨前移 | COM 垂直位置
+Propulsion | 髋伸 | 膝伸 | 跖屈 | 对侧手臂前摆
+Toe-off | 最大/近最大髋伸 | 膝开始屈 | 末端跖屈 | trunk
+Mid-swing | 髋屈 | 最大膝屈 | 足背屈恢复 | 肩-髋相位
+Terminal swing | 髋屈 | 膝伸 | 准备落地 | arm counter-rotation
+--- /TABLE ---
+对“好坏”最值得检测的不是每一个绝对角，而是：
+以及：
+这些量更适合视频系统。
+#长跑的力学发力时序
+Hamner 等的经典肌骨模拟研究 Muscle contributions to propulsion and support during running 显示，跑步支撑阶段的垂直支撑和向前推进不是由一块肌肉完成：股四头肌和踝跖屈肌群是 COM 支撑/推进的重要贡献者，其中早期支撑和晚期推进的功能明显不同。[32]
+全文：
+https://pmc.ncbi.nlm.nih.gov/articles/PMC2973845/
+对于你的标签，可以把跑步支撑近似分为：
+--- TABLE ---
+
+--- /TABLE ---
+建议针对力曲线存储：
+Fz_peak
+Fz_time_to_peak
+braking_Fx_peak
+braking_impulse
+propulsive_Fx_peak
+propulsive_impulse
+ankle_moment_peak + time
+knee_extension_moment_peak + time
+hip_moment_peak + time
+而且这些量都要除以体重/质量进行归一化，例如：
+不要给所有跑速一个固定 GRF 红线。跑步速度、坡度、步频和落地方式都会改变力和组织载荷；Van Hooren 数据集正好允许你对此进行条件化学习。[33]
+#最适合你的长跑原始数据集
+#Van Hooren & Meijer
+题目： Dataset of running kinematics, kinetics and muscle activation at different speeds, surface gradients, cadences and with forward trunk lean
+作者： Bas Van Hooren, Kenneth Meijer
+期刊： Data in Brief
+年份： 2024
+机构： Maastricht University Medical Centre+
+样本： 19 人，10 男/9 女，约 23.6±3.7 岁，从未训练者到奥运级运动员。[34]
+条件：
+速度：2.78、3.00、3.33、4.00、5.00 m/s
+坡度：−6°、−3°、+3°、+6°
+cadence：preferred、−10/+10 steps/min
+额外前倾躯干条件。[34]
+数据：
+Vicon 3D marker
+1000 Hz instrumented treadmill GRF
+11 肌 surface EMG
+raw C3D
+OpenSim joint angle
+joint moment
+muscle force
+joint contact force
+时间归一化曲线。[8]
+是否原始数据：是，且非常完整。
+OSF：
+https://osf.io/7qbxc/
+论文：
+https://doi.org/10.1016/j.dib.2024.110312
+这是我认为最适合你当前项目的一套跑步 ground-truth 数据。
+#Fukuchi、Fukuchi、Duarte
+题目： A public data set of running biomechanics and the effects of running speed on lower extremity kinematics and kinetics
+作者： Reginaldo Fukuchi, Claudiane Fukuchi, Marcos Duarte
+期刊： PeerJ
+年份： 2017
+数据仓储当前版本： 39 名受试者 raw + processed；原论文主要分析完整速度条件子样本。[9]
+跑速：
+2.5 m/s
+3.5 m/s
+4.5 m/s
+格式：
+.c3d
+.txt
+metadata
+foot-strike pattern
+muscle strength/flexibility
+Visual3D model/pipeline。[9]
+运动学：有
+动力学：有
+EMG：无
+视频：不是核心模态
+许可：CC BY 4.0。[9]
+下载：
+https://figshare.com/articles/dataset/A_comprehensive_public_data_set_of_running_biomechanics_and_the_effects_of_running_speed_on_lower_extremity_kinematics_and_kinetics/4543435
+整包约 770 MB，可直接下载。[9]
+#Mei 等的 5 km 距离跑数据集
+题目： Dataset of lower extremity joint angles, moments and forces in distance running
+作者： Qichang Mei, Justin Fernandez, Liangliang Xiang, Zixiang Gao, Peimin Yu, Julien S. Baker, Yaodong Gu
+期刊： Heliyon
+年份： 2022
+机构： 宁波大学、University of Auckland 等。[11]
+20 名休闲跑者在 5 km 跑前、跑后采集：
+marker trajectories
+GRF
+bilateral walking/running
+raw .C3D
+processed .MAT
+joint angles
+joint moments
+forces
+multi-segment foot data。[11]
+特别适合你的：
+研究“疲劳导致动作变差”比只研究静态优秀跑姿更符合实际产品需求。
+下载：
+https://auckland.figshare.com/projects/Dataset_of_Lower_Extremity_Joint_Angles_Moments_and_Forces_in_Distance_Running/136708
+论文：
+https://doi.org/10.1016/j.heliyon.2022.e11517
+#Riglet 等全身运动学 + 力台 + 视频
+题目： 3D motion analysis dataset of healthy young adult volunteers walking and running on overground and treadmill
+作者： Louis Riglet, Corentin Delphin, Lauranne Claquesin, Baptiste Orliac, Paul Ornetti, Davy Laroche, Mathieu Gueugnon 等
+期刊： Scientific Data
+年份： 2024
+样本： 30 人，16 男/14 女，28.0±5.6 岁。[35]
+它特别适合你，是因为不是只给几个摘要值，而是提供：
+63 marker 全身轨迹
+3D GRF 与 moment
+raw C3D / CSV
+processed C3D / CSV
+overground 视频
+comfortable / fast running
+overground + treadmill。[35]
+共有：
+overground running：约 2931 gait cycles
+treadmill running：约 18,945 gait cycles。[35]
+这套数据对“RGB/视频 → keypoint → biomechanics”尤其有价值，因为过地跑条件下有同步视频记录。[35]
+论文：
+https://www.nature.com/articles/s41597-024-03420-y
+数据 DOI：
+https://doi.org/10.6084/m9.figshare.c.7056797.v1
+#EMG 大样本补充
+Alessandro Santuz、Antonis Ekizos、Lars Janshen、Frank Mersmann、Sebastian Bohm、Vasilios Baltzopoulos、Adamantios Arampatzis 的 Modular Control of Human Movement During Running: An Open Access Data Set，Frontiers in Physiology，2018 年，公开了 135 名健康青年、78 男/57 女的跑步下肢 EMG，并附带肌肉协同 NMF 分解代码/结果。[36]
+论文：
+https://doi.org/10.3389/fphys.2018.01509
+这套数据非常适合训练：
+但由于它与 RGB 视频并非专门为视觉姿态估计同步建立，建议用作生理时序先验，而不是直接做视频监督标签。
+#跳高：最后助跑、制动转换、起跳与过杆
+#最有价值的世界级基准：World Athletics 2017 男子跳高决赛
+Gareth Nicholson、Athanassios Bissas、Stéphane Merlino 的 Biomechanical Report for the IAAF World Championships 2017: High Jump Men's，由 IAAF/现 World Athletics 生物力学研究项目发布，2018 年，是你建立世界级跳高 reference envelope 最直接的来源之一。World Athletics 的官方 Research Centre 保存了伦敦 2017 等赛事的生物力学报告。[37]
+官方研究中心：
+https://worldathletics.org/about-iaaf/documents/research-centre
+#最后三步和接触时间
+决赛运动员最后三步具有明显个体差异，最后起跳脚接触时间则较集中：
+0.14–0.19 s，10 名决赛选手平均约 0.169 s。[38]
+这个指标非常适合作为跳高模型的重要 timing feature：
+takeoff_contact_time:
+elite_finalist_reference ≈ 140–190 ms
+注意：这是世界锦标赛男子决赛的精英参考带，不是青少年或业余运动员的医学阈值。
+#起跳脚膝踝角度
+报告中膝角约 180° 代表伸直。[39]
+--- TABLE ---
+阶段 | 膝角 reference | 踝角 reference | 模型用途
+倒数第二步触地 | 114–155° | — | 降低 COM / 准备
+倒数第二步离地 | 132–155° | — | 转入最后一步
+起跳脚 Touchdown | 161–170° | 113–130° | 极高价值关键帧
+支撑期最大膝屈 | 124–140° | 最低约 89–119° | 弹性制动
+Toe-off | 167–178° | 125–155° | 三关节伸展结果
+--- /TABLE ---
+[39]
+这说明一个非常值得用在“坏姿态检测”中的特征是：
+即最后支撑中膝盖“压下去多少”。
+对于世界级样本，触地约 161–170°、最低约 124–140°，因此存在明显的受控屈曲，但不是完全僵直，也不是持续塌陷。[39]
+#起跳速度、角度和起跳位置
+同一世界锦标赛男子决赛样本中：
+--- TABLE ---
+参数 | 世界级参考范围
+起跳触地瞬间 COM 竖直速度 | 大多为负，约 −0.25 至 −0.90 m/s
+离地竖直速度 | 4.52–4.98 m/s
+离地合速度 | 5.87–6.79 m/s
+离地速度方向/起跳角 | 44–53°
+起跳点至横杆水平距离 | 0.78–1.70 m
+水平速度损失 | 个体差异显著，约数十个百分点
+--- /TABLE ---
+[40]
+这说明优秀跳高不是把所有水平速度都转成竖直速度。运动员需要在保持一定水平速度的同时获得约 4.5–5.0 m/s 的竖直离地速度。
+因此你的“好坏评分”可以非常明确地拆成：
+其中起跳技术权重最高。
+#起跳膝关节发力时序
+World Athletics 数据中最后支撑：
+膝屈曲时间：0.08–0.13 s
+膝伸展时间：0.06–0.08 s
+10 人大致平均约：
+屈曲 ≈0.10 s
+伸展 ≈0.073 s。[39]
+因此对于 240 fps 视频：
+0.10 s ≈ 24 帧
+0.073 s ≈ 18 帧
+可以很好地拟合角度—时间曲线。
+而对于 30 fps：
+0.10 s 只有约 3 帧
+几乎不够建立可靠的峰值角速度与时序。
+#跳高 GRF
+Susana Martins、João Carvalho、Filipe Conceição 的 Insights of Take-Off of Ground Reactions Force in High Jump，International Conference on Biomechanics in Sports / ISBS，2010 年，对 9 名男子跳高运动员使用 1000 Hz Bertec 力台 + 1000 Hz 高速相机。运动员 PB 平均约 1.91±0.20 m。[41]
+原始会议页面及 PDF：
+https://ojs.ub.uni-konstanz.de/cpa/article/view/4562
+结果：
+清除高度约 1.75–2.05 m
+起跳接触平均 0.197±0.020 s
+范围 0.169–0.228 s
+脚相对于横杆方向约 40.5±10.2°
+垂直 GRF 约 1170–4110 N
+个体的垂直 GRF 曲线可表现为双峰或三峰。[42]
+以样本平均质量 71.3 kg 粗略换算，1170–4110 N 相当于约 1.7–5.9 个平均体重的力水平；因为极值并不一定来自平均体重个体，这个 BW 数字只能作为量级解释，正式训练标签应使用每名受试者自己的：
+进行归一化。原论文提供的是绝对力范围。[42]
+#跳高肩肘角度为什么不建议现在设硬阈值
+和短跑不同，本次检索到的高质量跳高比赛生物力学报告主要集中于：
+助跑速度
+最后三步
+COM
+起跳腿髋膝踝
+起跳位置
+起跳角度
+起跳时间
+而没有形成广泛验证的“肩必须多少度、肘必须多少度”的精英阈值。
+因此你的第一版跳高模型应该把肩肘用于：
+双臂/单臂摆动类型识别；
+肩部最大上举时间；
+手腕相对 COM 的垂直速度；
+左右臂角速度；
+臂摆峰值与起跳膝伸峰值的相位差；
+暂时不要用肩角/肘角做强硬 good/bad 标签。
+#跳高 EMG 的证据缺口
+公开、同步的高跳比赛/专项 3D + GRF + EMG + RGB数据集明显少于跑步。本次检索没有找到可以直接下载、规模足以用于深度模型训练的世界级跳高 EMG 数据集。现有公开高跳资料最成熟的仍是比赛视频/运动学与少量力台研究。[43]
+因此高跳模型的合理路线是：
+用 World Athletics 精英数据建立起跳角度/时序 reference；
+用公开 running/jumping biomechanics 数据进行运动学—动力学预训练；
+自己采集高跳专项 RGB + force plate + optional EMG 小样本；
+用迁移学习进行 fine-tuning。
+不建议把普通 CMJ EMG 直接标成高跳 Fosbury-flop 的肌激活 ground truth。
+#开放数据集、国内资料与训练价值
+#最值得用于大模型训练的数据集
+--- TABLE ---
+数据集/论文 | 项目适用 | 数据类型 | 样本 | 原始运动学 | GRF/力矩 | EMG | 视频 | 公开下载 | 训练价值
+Van Hooren & Meijer 2024 Dataset of running kinematics, kinetics and muscle activation… | 长跑/跑步 ★★★★★ | C3D/3D/GRF/OpenSim/EMG | 19 | ✅ | ✅ | ✅ 11肌 | — | ✅ OSF | 姿态→力→EMG 首选 [8]
+Fukuchi et al. 2017 A public data set of running biomechanics… | 长跑 ★★★★★ | C3D/TXT/运动学/动力学 | repository 39 | ✅ | ✅ | ❌ | — | ✅ CC BY 4.0 | 速度条件 reference [9]
+Mei et al. 2022 Dataset of lower extremity joint angles, moments and forces in distance running | 长跑 ★★★★★ | C3D/MAT/GRF/关节力 | 20 | ✅ | ✅ | ❌ | — | ✅ | 疲劳前后特别有用 [11]
+Riglet et al. 2024 3D walking/running dataset | 长跑 ★★★★★ | 63-marker/C3D/CSV/GRF | 30 | ✅ | ✅ | ❌ | ✅ overground | ✅ Figshare | CV→Biomechanics 很适合 [35]
+AddBiomechanics 1.0 | 通用/跑步 ★★★★★ | marker/GRF/kinematics/torques | 273 | ✅ | ✅ | 部分源不同 | 否为核心 | ✅ CC BY 4.0 | 2400万+帧预训练库 [10]
+Santuz et al. 2018 EMG running dataset | 跑步 ★★★★☆ | EMG + muscle synergy | 135 | 非核心 | — | ✅ | — | ✅ | EMG 时序/协同预训练 [44]
+GroundLink | 通用跑跳 ★★★★☆ | MoCap + real GRF/CoP | 368 trials | ✅ | ✅ | ❌ | 非核心 | ✅ | 视觉/运动→地面力学习 [45]
+AthletePose3D | 体育动作 ★★★★☆ | 3D pose/运动学验证 | 体育动作集 | ✅ | — | — | ✅ | ✅ GitHub | 用于高速体育3D姿态迁移 [46]
+AthleticsPose | 田径视觉 ★★★★☆ | athletics 3D pose | 23 athletes | ✅ | — | — | ✅ | ✅ GitHub | 与真实田径场景域更接近 [47]
+Mattes et al. 2021 | 短跑 ★★★★★ | 高速视频/2D运动学 | 26 | 论文统计 | ❌ | ❌ | 原视频未公开为ML集 | 论文OA | 精英 angle/timing reference [48]
+Morin et al. 2015 | 短跑 ★★★★★ | GRF + EMG + kinetics | 14 | 部分 | ✅ | ✅ | — | 论文OA | 腘绳肌末摆期标签 [23]
+Bezodis et al. 2014 | 短跑起跑 ★★★★★ | 1000Hz力+200Hz视频 | 3 elite | ✅实验 | ✅ | ❌ | 非公开ML集 | 论文/DOI | 第一支撑关节功率 [22]
+World Athletics 2017 HJ Men | 跳高 ★★★★★ | 比赛视频/3D运动学 | 世界锦标赛决赛 | 报告统计 | 部分 | ❌ | 比赛视频 | 报告公开 | 最高价值精英基准 [49]
+Martins et al. 2010 | 跳高 ★★★★★ | 1000Hz force plate + camera | 9 | 部分 | ✅ GRF | ❌ | 实验录像非ML公开 | PDF公开 | 起跳 GRF 模板 [41]
+Hanley et al. 2022 800m | 中长跑 ★★★★★ | 150Hz competition video | 8 elite | ✅统计 | ❌ | ❌ | 比赛视频 | 论文OA | 世界级比赛 gait reference [50]
+--- /TABLE ---
+#AddBiomechanics 为什么值得单独强调
+Stanford 相关 AddBiomechanics 项目公开的 1.0 high-quality core dataset 汇总 273 名参与者、约 71.47 小时动作，其中约 57.55 小时含 GRF，总计超过 2400 万帧。每帧可包含 optical marker、GRF/ground moment、估计关节运动学、逆动力学关节力矩以及 COM 运动学，而且采用 CC BY 4.0。[10]
+主页：
+https://addbiomechanics.org/download_data.html
+官方直接下载方式也公开在网页中：[10]
+wget -O AddBiomechanicsDataset.zip \
+http://archive.simtk.org/addbiomechanics/addbiomechanics.zip
+它尤其适合你训练一个基础模型：
+然后再用田径专项数据 fine-tune。
+#GroundLink
+GroundLink: A Dataset Unifying Human Body Movement and Ground Reaction Dynamics，Xingjian Han、Benjamin Senderling、Stanley To、Deepak Kumar、Emily Whiting、Jun Saito，包含 368 个处理后动作 trial、约159万帧、19 类动作，GRF 与 CoP 是力台真实采集而非仿真。[45]
+数据/代码：
+https://csr.bu.edu/groundlink/
+它不是专门田径数据集，但对于训练：
+非常有价值。
+#AthletePose3D 与田径视觉数据
+AthletePose3D: A Benchmark Dataset for 3D Human Pose Estimation and Kinematic Validation in Athletic Movements 是面向体育高动态动作的 3D 姿态研究资源，其 GitHub 提供数据/代码入口。它的价值在于解决普通 COCO/Human3.6M 对高速、极端关节构型覆盖不足的问题。[46]
+https://github.com/calvinyeungck/AthletePose3D
+另一个值得跟进的是 AthleticsPose，其目标场景就是田径真实运动环境，公开代码/数据入口：[47]
+https://github.com/SZucchini/AthleticsPose
+这两类视觉数据最适合训练你的关键点检测/3D lifting，但它们不能替代 force plate 数据作为动力学 ground truth。
+#国内北京体育大学与上海体育大学资料
+本次检索到的国内资料相对于欧美公开数据库存在一个明显差异：论文、硕博论文和综述不少，但可直接下载用于机器学习的原始 C3D + GRF + EMG 数据明显更少。
+北京体育大学资料中可检索到张烨城 2020 年关于 《国内二级水平百米运动员起跑前五步下肢关节角度变化对加速阶段影响的研究》 的研究线索，研究问题与你的短跑起跑阶段非常匹配，但本次检索未发现配套公开授权的原始运动学数据包。[51]
+上海体育大学相关中文研究/综述中，包括关于跑步经济性与步态时空参数的系统讨论，可作为中文指标定义和国内训练语境补充，但同样不像 OSF/Figshare 那样附带标准化开放原始数据。[52]
+因此在“训练数据”层面，我会优先使用：
+国际开放 C3D/GRF/EMG → 建基础模型
+再用：
+北体/上体中文论文 + 国内教练标注 → 做中文知识增强与技术评价规则
+而不是反过来。
+#汇总指标、下载链接与推荐可视化
+#可以直接进入你数据库的第一版参考表
+下面的范围是文献参考带，不是医学诊断阈值；其中“精英参考”尤其只能用于相近速度/水平运动员。
+--- TABLE ---
+项目 | 阶段 | 指标 | 推荐第一版 reference | 证据级别
+短跑 | Set | 前腿膝角 | ≈90° | 传统起跑 reference [53]
+短跑 | Set | 后腿膝角 | ≈130° | 传统起跑 reference [53]
+短跑 | Max-V touchdown | 髋角 | 147±8° | 精英/高水平实测 [19]
+短跑 | Max-V touchdown | 膝角 | 156±6° | 精英/高水平实测 [19]
+短跑 | Max-V touchdown | 踝角 | 127±7° | 精英/高水平实测 [19]
+短跑 | Max-V toe-off | 髋 | 181±5° | 实测 [19]
+短跑 | Max-V toe-off | 膝 | 155±7° | 实测 [19]
+短跑 | Max-V toe-off | 踝 | 147±7° | 实测 [19]
+短跑 | Max-V | 接触时间 | 85–110 ms | 实测范围 [54]
+短跑 | Max-V | 步频 | 4.22–5.00 Hz | 实测范围 [54]
+短跑 | Max-V | 步长 | 2.07–2.51 m | 实测范围；需按身高/速度归一化 [54]
+短跑 | Pre-contact | BF EMG | 末摆期提前高激活 | 性能相关时序 [23]
+短跑 | Pre-contact | 脚后摆速度 | 5.27±0.77 m/s | treadmill acceleration 样本 [25]
+800 m | 高速比赛 | 步频 | 3.29→3.52 Hz | 世界锦标赛女子 [50]
+800 m | 末段冲刺 | 步频 | 可达 ≈3.82 Hz | 单个世界级比赛实例 [55]
+800 m | IC | 小腿倾角 | ≈7°→4° | 世界级比赛 [55]
+长跑 | cadence intervention | cadence | preferred ±5/10%建模 | 实验设计，不是180硬阈值 [56]
+跳高 | Takeoff TD | 膝角 | 161–170° | 世锦赛男子决赛 [39]
+跳高 | max knee flex | 膝角 | 124–140° | 世锦赛男子决赛 [39]
+跳高 | Toe-off | 膝角 | 167–178° | 世锦赛男子决赛 [39]
+跳高 | TD | 踝角 | 113–130° | 世锦赛男子决赛 [39]
+跳高 | max flex | 踝角 | 89–119° | 世锦赛男子决赛 [39]
+跳高 | Toe-off | 踝角 | 125–155° | 世锦赛男子决赛 [39]
+跳高 | Takeoff | 接触时间 | 0.14–0.19 s | 世锦赛决赛 [38]
+跳高 | Takeoff | 膝屈阶段 | 0.08–0.13 s | 世锦赛决赛 [39]
+跳高 | Takeoff | 膝伸阶段 | 0.06–0.08 s | 世锦赛决赛 [39]
+跳高 | Toe-off | COM 竖直速度 | 4.52–4.98 m/s | 世锦赛决赛 [57]
+跳高 | Toe-off | 合速度 | 5.87–6.79 m/s | 世锦赛决赛 [57]
+跳高 | Toe-off | 起跳角 | 44–53° | 世锦赛决赛 [57]
+跳高 | Takeoff | 垂直 GRF | 1170–4110 N | 9人力台实验 [42]
+--- /TABLE ---
+#论文/数据集下载清单
+短跑
+Mattes, Wolff, Alizadeh — Kinematic Stride Characteristics of Maximal Sprint Running of Elite Sprinters
+https://pmc.ncbi.nlm.nih.gov/articles/PMC8008308/
+运动学：✅　动力学：❌　EMG：❌　原始数据公开：论文统计为主。[48]
+Miyashiro/Nagahara 等 — Kinematics of Maximal Speed Sprinting With Different Running Speed, Leg Length, and Step Characteristics
+https://pmc.ncbi.nlm.nih.gov/articles/PMC7739839/
+运动学：✅　回归模型：✅　原始数据：作者可按合理请求提供。[17]
+Morin et al. — Sprint Acceleration Mechanics: The Major Role of Hamstrings in Horizontal Force Production
+https://pmc.ncbi.nlm.nih.gov/articles/PMC4689850/
+运动学：✅　动力学/GRF：✅　EMG：✅。[23]
+Bezodis, Salo, Trewartha — Lower limb joint kinetics during the first stance phase in athletics sprinting
+https://doi.org/10.1080/02640414.2013.849000
+1000 Hz force：✅　200 Hz video：✅　joint moment/power：✅　EMG：❌。[22]
+Bezodis et al. — The Biomechanics of the Track and Field Sprint Start: A Narrative Review
+https://pmc.ncbi.nlm.nih.gov/articles/PMC6684547/
+综述/起跑定量规则来源。[58]
+Macadam et al. — Role of Arm Mechanics During Sprint Running，NSCA Strength and Conditioning Journal
+https://www.researchgate.net/publication/324271038_Role_of_Arm_Mechanics_During_Sprint_Running_A_Review_of_the_Literature_and_Practical_Applications
+上肢运动学综述，无开放专项原始数据。[26]
+长跑/中长跑
+Folland et al. — Running Technique is an Important Component of Running Economy and Performance
+https://repository.lboro.ac.uk/articles/journal_contribution/Running_technique_is_an_important_component_of_running_economy_and_performance/9563207
+Loughborough University / Medicine & Science in Sports & Exercise。[59]
+Hanley, Merlino, Bissas — Biomechanics of World-Class 800 m Women at the 2017 IAAF World Championships
+https://www.frontiersin.org/journals/sports-and-active-living/articles/10.3389/fspor.2022.834813/full
+世界级比赛 150 Hz 视频运动学。[50]
+Fukuchi, Fukuchi, Duarte — running biomechanics dataset
+https://figshare.com/articles/dataset/A_comprehensive_public_data_set_of_running_biomechanics_and_the_effects_of_running_speed_on_lower_extremity_kinematics_and_kinetics/4543435
+Raw C3D：✅　kinetics：✅　CC BY 4.0：✅。[9]
+Van Hooren & Meijer — running kinematics/kinetics/EMG
+https://osf.io/7qbxc/
+Raw C3D：✅　GRF：✅　EMG：✅　joint moments：✅　OpenSim：✅。[8]
+Mei et al. — distance running pre/post 5 km
+https://auckland.figshare.com/projects/Dataset_of_Lower_Extremity_Joint_Angles_Moments_and_Forces_in_Distance_Running/136708
+Raw C3D：✅　GRF：✅　MAT：✅　moments/forces：✅。[60]
+Riglet et al. — full-body walking/running dataset
+https://www.nature.com/articles/s41597-024-03420-y
+Data: https://doi.org/10.6084/m9.figshare.c.7056797.v1
+C3D/CSV：✅　GRF/moment：✅　视频：部分条件✅。[35]
+Santuz et al. — large EMG running dataset
+https://doi.org/10.3389/fphys.2018.01509
+135 人 EMG + muscle synergy：✅。[44]
+AddBiomechanics
+https://addbiomechanics.org/download_data.html
+273 人、2400万+帧、GRF、关节运动学、关节力矩：✅。[10]
+GroundLink
+https://csr.bu.edu/groundlink/
+MoCap + true GRF + CoP：✅。[45]
+跳高
+World Athletics Research Centre — London 2017 High Jump biomechanical reports
+https://worldathletics.org/about-iaaf/documents/research-centre
+精英比赛运动学：✅　公开原始 C3D/EMG：❌。[61]
+Martins, Carvalho, Conceição — Insights of Take-Off of Ground Reactions Force in High Jump
+https://ojs.ub.uni-konstanz.de/cpa/article/view/4562
+1000 Hz force plate：✅　高速摄影：✅　公开论文 PDF：✅　原始 trial 文件：未公开为机器学习包。[62]
+视觉姿态预训练
+AthletePose3D
+https://github.com/calvinyeungck/AthletePose3D
+3D sports pose：✅　高速体育动作：✅。[46]
+AthleticsPose
+https://github.com/SZucchini/AthleticsPose
+田径场景 3D pose：✅。[47]
+#建议生成的可视化图表
+你的最终训练/分析平台最好不要只显示骨架和一个角度数字，而应至少生成以下图。
+最重要的是“角度—时间曲线”。 对每个运动员，把横轴统一成一个步态周期或起跳支撑 0–100%，纵轴分别画髋、膝、踝。再叠加文献/数据集 reference 的均值及 P10–P90 或 ±1 SD band。这样一眼就能看出是“触地姿势异常”，还是“峰值出现太早/太晚”。
+例如短跑：
+Joint angle
+180° ┤      hip ───────────────╮
+160° ┤  knee TD ●             ╰──
+140° ┤                    ╭───────
+120° ┤ ankle ●──────╮─────╯
+100° ┤              ╰─
+     └─────────────────────────────
+      TD          Midstance      TO
+       0%              50%       100%
+第二张应为 GRF—时间曲线：
+Force / BW
+6 ┤                 ╭─╮
+5 ┤                ╭╯ ╰╮
+4 ┤              ╭─╯   ╰╮
+3 ┤            ╭─╯       ╰─╮
+2 ┤         ╭──╯            ╰╮
+1 ┤─────────╯                 ╰────
+0 └────────────────────────────────
+   TD                            TO
+尤其高跳可以同时标出：
+TD → Fz peak 1 → max knee flexion → Fz peak 2/3 → max knee extension velocity → TO
+因为高跳力台研究已经观察到双峰与三峰 GRF 模式。[42]
+第三张是 EMG heatmap：
+Terminal swing     Early stance     Late stance
+BF             ████████████       ████████          ██
+Glute max       █████████          ████████          ██
+RF/VL              ███            ███████           ██
+Gastroc              ██            ██████        █████████
+Soleus                █            ███████       ██████████
+具体数值不要手工绘制，而应直接从 Van Hooren 或 Santuz 的原始 EMG 数据做 gait-event normalization。[63]
+第四张应是关键帧运动链 dashboard：
+--- TABLE ---
+
+--- /TABLE ---
+第五张建议做 radar chart，但只用于最终展示：
+接触时间 / 膝支撑稳定 / 踝回弹 / 触地位置 / 摆腿速度 / 左右对称 / 上肢协调
+不要用雷达图作为科学分析本身。
+#如果论文只有曲线、没有数字表，怎样数值化
+对于 World Athletics 报告或期刊只给 angle-time、GRF-time、EMG-time 图而不给 CSV 的情况，推荐标准流程是：
+优先检查 supplementary data / OSF / Figshare；
+没有原始数据时，用 WebPlotDigitizer 对论文图进行数字化；
+横轴归一化为 stance 或 gait cycle 的 0–100%；
+每条曲线至少采样 101 点；
+同时记录曲线图像分辨率、原文角度定义、速度、样本和误差带；
+将 digitized 数据标记为 source_type = figure_digitized，绝不能与原始 C3D 数据混为同一置信等级；
+对可见 mean±SD shaded band，分别 digitize mean/upper/lower；
+最终保存成类似：
+{
+  "sport": "sprint",
+  "phase": "max_velocity",
+  "event": "stance",
+  "speed_mps": 10.6,
+  "joint": "knee",
+  "angle_convention": "internal_angle_180_extended",
+  "time_normalized": [0, 1, 2, 3, 4],
+  "mean_deg": [156.0, 154.2, 151.0, 149.1, 148.0],
+  "source": "Mattes2021",
+  "source_type": "paper_table_or_digitized_curve"
+}
+#最适合你后续大模型的数据结构
+最终不建议你的训练样本只有：
+{
+  "image": "...",
+  "label": "bad_running"
+}
+更适合做成：
+{
+  "sport": "sprint",
+  "subphase": "max_velocity",
+  "event": "touchdown",
+  "athlete_level": "elite",
+  "speed_mps": 10.6,
+  "fps": 240,
+
+  "kinematics": {
+    "hip_deg": 147.0,
+    "knee_deg": 156.0,
+    "ankle_deg": 127.0,
+    "trunk_deg": 3.2,
+    "shank_deg": 1.8,
+    "elbow_deg": 92.0
+  },
+
+  "temporal": {
+    "contact_time_ms": 96,
+    "flight_time_ms": 124,
+    "cadence_hz": 4.56
+  },
+
+  "dynamic_features": {
+    "knee_flexion_during_stance_deg": 7.0,
+    "precontact_foot_velocity_mps": 5.27
+  },
+
+  "kinetics": {
+    "grf_vertical_bw": null,
+    "hip_moment_nmkg": null,
+    "knee_moment_nmkg": null,
+    "ankle_moment_nmkg": null
+  },
+
+  "emg": {
+    "biceps_femoris": null,
+    "gluteus_maximus": null
+  },
+
+  "reference": {
+    "dataset": "Mattes_2021",
+    "deviation_z": {}
+  },
+
+  "quality": {
+    "reference_similarity_score": 0.87,
+    "performance_linked_alerts": []
+  }
+}
+这样构造以后，你的系统就不只是“YOLO 看动作像不像”，而是变成：
+这条路线与现有短跑、长跑和跳高生物力学证据的结构最吻合：真正有区分力的往往不是某一帧“角度漂亮不漂亮”，而是角度在正确时间发生、支撑期形变是否合理、触地时间是否合理、关节之间是否按正确次序产生/吸收能量，以及这些模式是否与当前速度和运动员自身条件匹配。[64]
+[1] [16] [17] [20] Kinematics of Maximal Speed Sprinting With Different Running Speed, Leg Length, and Step Characteristics - PMC
+https://pmc.ncbi.nlm.nih.gov/articles/PMC7739839/
+[2] [13] [14] [15] [18] [19] [48] [54] Kinematic Stride Characteristics of Maximal Sprint Running of Elite Sprinters – Verification of the “Swing-Pull Technique” - PMC
+https://pmc.ncbi.nlm.nih.gov/articles/PMC8008308/
+[3] [53] Biomechanics of the sprint start - PubMed
+https://pubmed.ncbi.nlm.nih.gov/9017856/?utm_source=chatgpt.com
+[4] [27] [50] Biomechanics of World-Class 800 m Women at the 2017 ...
+https://www.frontiersin.org/journals/sports-and-active-living/articles/10.3389/fspor.2022.834813/full?utm_source=chatgpt.com
+[5] [6] [38] [39] [40] [57] (PDF) Biomechanical Report for the IAAF World Championships 2017: High Jump Men's
+https://www.researchgate.net/publication/326489934_Biomechanical_Report_for_the_IAAF_World_Championships_2017_High_Jump_Men%27s
+[7] [23] [24] [25] Sprint Acceleration Mechanics: The Major Role of Hamstrings in Horizontal Force Production - PMC
+https://pmc.ncbi.nlm.nih.gov/articles/PMC4689850/
+[8] Dataset of running biomechanics across different speeds, ...
+https://osf.io/7qbxc/overview?utm_source=chatgpt.com
+[9] Item - A public data set of running biomechanics and the effects of running speed on lower extremity kinematics and kinetics - figshare - Figshare
+https://figshare.com/articles/dataset/A_comprehensive_public_data_set_of_running_biomechanics_and_the_effects_of_running_speed_on_lower_extremity_kinematics_and_kinetics/4543435
+[10] AddBiomechanics
+https://addbiomechanics.org/download_data.html
+[11] (PDF) Dataset of lower extremity joint angles, moments and ...
+https://www.researchgate.net/publication/365361614_Dataset_of_lower_extremity_joint_angles_moments_and_forces_in_distance_running?utm_source=chatgpt.com
+[12] [22] [64] Lower limb joint kinetics during the first stance phase in athletics sprinting: three elite athlete case studies - PubMed
+https://pubmed.ncbi.nlm.nih.gov/24359568/
+[21] [58] The Biomechanics of the Track and Field Sprint Start: A Narrative Review
+https://pmc.ncbi.nlm.nih.gov/articles/PMC6684547/?utm_source=chatgpt.com
+[26] (PDF) Role of Arm Mechanics During Sprint Running
+https://www.researchgate.net/publication/324271038_Role_of_Arm_Mechanics_During_Sprint_Running_A_Review_of_the_Literature_and_Practical_Applications?utm_source=chatgpt.com
+[28] Men's and Women's World Championship Marathon ...
+https://eprints.glos.ac.uk/8661/1/8661-Bissas-%282020%29-Mens-and-womens-world-championship-marathon.pdf?utm_source=chatgpt.com
+[29] [30] Running Technique is an Important Component of ...
+https://pubmed.ncbi.nlm.nih.gov/28263283/?utm_source=chatgpt.com
+[31] [56] Effects of step rate manipulation on joint mechanics during running
+https://pubmed.ncbi.nlm.nih.gov/20581720/?utm_source=chatgpt.com
+[32] Muscle contributions to propulsion and support during running
+https://pmc.ncbi.nlm.nih.gov/articles/PMC2973845/?utm_source=chatgpt.com
+[33] [34] [63] (PDF) Dataset of running kinematics, kinetics and muscle ...
+https://www.researchgate.net/publication/378891472_Dataset_of_running_kinematics_kinetics_and_muscle_activation_at_different_speeds_surface_gradients_cadences_and_with_forward_trunk_lean?utm_source=chatgpt.com
+[35] 3D motion analysis dataset of healthy young adult volunteers walking and running on overground and treadmill | Scientific Data
+https://www.nature.com/articles/s41597-024-03420-y
+[36] alesantuz.com
+https://alesantuz.com/?utm_source=chatgpt.com
+[37] [49] [61] Research Centre | Official Documents
+https://worldathletics.org/about-iaaf/documents/research-centre?utm_source=chatgpt.com
+[41] [42] insights of take-off of ground reactions force in high jump - ResearchGate
+https://www.researchgate.net/publication/267506786_INSIGHTS_OF_TAKE-OFF_OF_GROUND_REACTIONS_FORCE_IN_HIGH_JUMP?utm_source=chatgpt.com
+[43] [62] INSIGHTS OF TAKE-OFF OF GROUND REACTIONS FORCE IN HIGH JUMP | ISBS - Conference Proceedings Archive
+https://ojs.ub.uni-konstanz.de/cpa/article/view/4562
+[44] Modular organization of murine locomotor pattern in the ...
+https://www.researchgate.net/publication/332041656_Modular_organization_of_murine_locomotor_pattern_in_the_presence_and_absence_of_sensory_feedback_from_muscle_spindles?utm_source=chatgpt.com
+[45] GroundLink: A Dataset Unifying Human Body Movement and Ground Reaction Dynamics
+https://arxiv.org/abs/2310.03930?utm_source=chatgpt.com
+[46] GitHub - calvinyeungck/AthletePose3D: Dataset and Code for CVSports at CVPR 2025 paper "AthletePose3D: A Benchmark Dataset for 3D Human Pose Estimation and Kinematic Validation in Athletic Movements" · GitHub
+https://github.com/calvinyeungck/AthletePose3D
+[47] AthleticsPose: Authentic Sports Motion Dataset on Athletic Field and ...
+https://arxiv.org/html/2507.12905v1?utm_source=chatgpt.com
+[51] 2020-05-19 2020年春季学术型硕士论文答辩安排 - 北京体育大学研究生院
+https://grs.bsu.edu.cn/xwgz/lwgl/d941319384164cf1a9ff4cbbeccbdc45.htm?utm_source=chatgpt.com
+[52] [PDF] 步态时空参数对跑步经济性的影响机制与协同优化框架 - 上海体育大学学报
+https://shtyxyxb.xml-journal.net/cn/article/pdf/preview/10.16099/j.sus.2025.01.06.0004.pdf?utm_source=chatgpt.com
+[55] (PDF) Biomechanics of World-Class 800 m Women at the ...
+https://www.researchgate.net/publication/359938895_Biomechanics_of_World-Class_800_m_Women_at_the_2017_IAAF_World_Championships?utm_source=chatgpt.com
+[59] Running technique is an important component of ...
+https://repository.lboro.ac.uk/articles/journal_contribution/Running_technique_is_an_important_component_of_running_economy_and_performance/9563207?utm_source=chatgpt.com
+[60] Project - Dataset of Lower Extremity Joint Angles, Moments and Forces in Distance Running - The University of Auckland - Figshare
+https://auckland.figshare.com/projects/Dataset_of_Lower_Extremity_Joint_Angles_Moments_and_Forces_in_Distance_Running/136708
+

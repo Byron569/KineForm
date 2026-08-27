@@ -1,0 +1,176 @@
+{
+  "project": {
+    "resolvedLane": "library_bound",
+    "selectedIntentWorkflowRead": true,
+    "contextRequirementsLoaded": [
+      {
+        "path": "shared-runtime/runtime-boundaries/lane-runtime-contracts.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "shared-runtime/agent-dispatch-runtime/lane-dispatch-index.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "delivery-quality/page-rendering-quality-gate.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "delivery-quality/design-artifact-validation.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      },
+      {
+        "path": "delivery-quality/delivery-evidence-contract.md",
+        "readStatus": "loaded",
+        "bodyRead": true
+      }
+    ],
+    "contextReadScope": "library-bound page generation",
+    "validationRunDiscipline": "post-dispatch full validation",
+    "lowValueCallWatchdog": {
+      "noProgressNextAction": "move to readiness or minimal blocked summary"
+    },
+    "operatingMode": "library-bound",
+    "designSource": {
+      "libraryIdentity": {
+        "name": "Google",
+        "id": "dl_builtin_google",
+        "version": "0",
+        "scope": "built-in-global",
+        "path": "c:\\Users\\Byron\\.trae-cn\\design_libraries\\Google",
+        "versionSource": null
+      },
+      "iconAssets": {
+        "source": "assets/icons",
+        "projectIconDir": "assets/icons/dl_builtin_apple",
+        "libraryKey": "dl_builtin_apple",
+        "renderMethod": "css-mask",
+        "pathTemplate": "../assets/icons/dl_builtin_apple/{name}.svg",
+        "availableNames": [
+          "arrow-down", "arrow-left", "arrow-right", "arrow-up",
+          "box", "check", "chevron-down", "chevron-left", "chevron-right",
+          "chevron-up", "chevrons-down-up", "chevrons-up-down",
+          "circle-alert", "circle-check", "circle-minus", "circle-pause",
+          "circle-play", "circle-plus", "circle-question-mark",
+          "external-link", "file", "folder-open", "folder", "funnel",
+          "grip", "heart", "house", "mail", "map-pin",
+          "message-circle-more", "mouse-pointer-click", "pen-line",
+          "send-horizontal", "star", "tag", "thumbs-down", "thumbs-up",
+          "trash-2", "triangle-alert", "user"
+        ],
+        "totalCount": 39,
+        "coloringRule": "currentColor by default; override with Library token when needed"
+      },
+      "brandPrefix": "google",
+      "cssPath": "c:\\Users\\Byron\\.trae-cn\\design_libraries\\Google\\colors_and_type.css",
+      "componentIndexSummary": [
+        { "slug": "button", "name": "Button", "variantCount": 6 },
+        { "slug": "card", "name": "Card", "variantCount": 5 },
+        { "slug": "input", "name": "Input", "variantCount": 4 },
+        { "slug": "navigation", "name": "Navigation", "variantCount": 5 }
+      ],
+      "allowedComponents": ["button", "card", "input", "navigation"],
+      "forbiddenInventedComponents": []
+    },
+    "designDecisionSummary": "Google M3 dark mode scientific instrument aesthetic. Inter for UI, JetBrains Mono for all numerical data. 4px grid spacing, panel-based layout, 1px border separation. Near-black background #0d0d0f, zero gradients, zero shadows, zero decorative icons. Data-forward design inspired by DaVinci Resolve / professional NLE tools.",
+    "dispatchPreflightManifest": [
+      {
+        "nodeId": "page-main",
+        "packetType": "LibraryBoundPagePacket",
+        "pageRuntimeGuide": "intent-workflows/intent-page-library-bound/library-bound-page-runtime.md",
+        "dispatchContract": "intent-workflows/intent-page-library-bound/dispatch-contract.md",
+        "allowedWritePaths": ["pages/main.html", "assets/"],
+        "toolPolicy": {
+          "todoWriteAllowed": false,
+          "validationScriptsAllowed": false,
+          "previewAllowed": false,
+          "helperScriptsAllowed": false,
+          "designFileWriteAllowed": false,
+          "allowedWritePaths": ["pages/main.html", "assets/"]
+        }
+      }
+    ],
+    "expectedDispatches": [
+      {
+        "nodeId": "page-main",
+        "packetType": "LibraryBoundPagePacket",
+        "status": "completed",
+        "changedFiles": ["pages/main.html"],
+        "toolCallLedger": {
+          "todoWriteCalls": 0,
+          "previewCalls": 0,
+          "validationScriptCalls": 0,
+          "helperScriptWrites": 0,
+          "source": "main-agent-runtime-trace",
+          "traceDigest": "manual-dispatch-kineform-annotator-page-main"
+        }
+      }
+    ],
+    "pages": [
+      {
+        "nodeId": "page-main",
+        "title": "KineForm 标注客户端主界面",
+        "deviceType": "desktop",
+        "viewportMode": "app-shell",
+        "pageType": "task-driven",
+        "themeMode": "dark",
+        "componentPlan": [
+          {
+            "slug": "button",
+            "contractFile": "c:\\Users\\Byron\\.trae-cn\\design_libraries\\dl_builtin_apple\\components\\button.json",
+            "previewFile": "c:\\Users\\Byron\\.trae-cn\\design_libraries\\dl_builtin_apple\\preview\\component-button.html"
+          },
+          {
+            "slug": "card",
+            "contractFile": "c:\\Users\\Byron\\.trae-cn\\design_libraries\\dl_builtin_apple\\components\\card.json",
+            "previewFile": "c:\\Users\\Byron\\.trae-cn\\design_libraries\\dl_builtin_apple\\preview\\component-card.html"
+          },
+          {
+            "slug": "input",
+            "contractFile": "c:\\Users\\Byron\\.trae-cn\\design_libraries\\dl_builtin_apple\\components\\input.json",
+            "previewFile": "c:\\Users\\Byron\\.trae-cn\\design_libraries\\dl_builtin_apple\\preview\\component-input.html"
+          }
+        ],
+        "actualTokenNameReference": [
+          "--google-background",
+          "--google-foreground",
+          "--google-card",
+          "--google-card-foreground",
+          "--google-popover",
+          "--google-popover-foreground",
+          "--google-primary",
+          "--google-primary-foreground",
+          "--google-secondary",
+          "--google-secondary-foreground",
+          "--google-muted",
+          "--google-muted-foreground",
+          "--google-accent",
+          "--google-accent-foreground",
+          "--google-destructive",
+          "--google-destructive-foreground",
+          "--google-border",
+          "--google-input",
+          "--google-ring",
+          "--google-chart-1",
+          "--google-chart-2",
+          "--google-chart-3",
+          "--google-chart-4",
+          "--google-chart-5",
+          "--google-success",
+          "--google-warning",
+          "--google-error"
+        ],
+        "tokenFidelity": "strict",
+        "qualityRisks": [
+          "app-shell fixed layout",
+          "complex multi-panel layout",
+          "dark mode contrast"
+        ]
+      }
+    ]
+  }
+}

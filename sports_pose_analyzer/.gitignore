@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 虚拟环境
+.venv/
+venv/
+
+# 模型权重（体积大，不入库；下载方式见 README）
+models/*.pth
+models/*.onnx
+models/*.part
+
+# 用户分析项目产物（含视频，不入库）
+projects/
+
+# 用户本地设置
+user_settings.json
+
+# 中间/临时文件
+*.render_tmp.mp4
+*.part
+outputs/
+tmp/
+
+# IDE
+.idea/
+.vscode/

@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>KineForm · DaVinci 标注工作台</title>
+    <link rel="icon" href="assets/icons/kineform-mark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell" data-app="kineform-workbench">
+      <header class="topbar">
+        <div class="topbar-left">
+          <a class="brand" href="#" aria-label="KineForm 首页">
+            <span class="brand-mark" aria-hidden="true">
+              <img src="assets/icons/kineform-mark.svg" alt="" />
+            </span>
+            <span class="brand-name">KineForm</span>
+          </a>
+          <span class="topbar-divider" aria-hidden="true"></span>
+          <div class="project-context">
+            <span class="overline">运动表现分析</span>
+            <select id="projectSelect" class="project-select mono" hidden aria-label="切换项目"></select>
+          </div>
+          <button class="topbar-button primary" data-action="analyze-video" id="analyzeVideoButton" title="分析视频 Ctrl+O">
+            <img class="icon icon-16" src="assets/icons/file.svg" alt="" />
+            分析视频
+          </button>
+          <span class="status-dot" aria-hidden="true"></span>
+          <span class="save-state" id="saveState">本地草稿</span>
+          <span class="service-status service-status-demo" id="serviceStatus" data-service-state="demo">
+            <span class="service-indicator" aria-hidden="true"></span>
+            <span id="serviceStatusText">演示模式 · API 待连接</span>
+            <small id="serviceVersion">v0.1.0</small>
+          </span>
+        </div>
+        <div class="topbar-right">
+          <button class="topbar-button quiet" data-action="open-project">
+            <img class="icon icon-16" src="assets/icons/folder-open.svg" alt="" />
+            刷新项目
+          </button>
+          <button class="topbar-button quiet" data-action="save">
+            <img class="icon icon-16" src="assets/icons/check.svg" alt="" />
+            保存标注
+          </button>
+          <button class="topbar-button primary" data-action="submit">
+            <img class="icon icon-16" src="assets/icons/send-horizontal.svg" alt="" />
+            提交分析
+          </button>
+          <button class="avatar" aria-label="当前用户 Byron Que">BQ</button>
+        </div>
+      </header>
+
+      <div class="analysis-banner" id="analysisBanner" role="status" aria-live="polite" hidden>
+        <span class="analysis-banner-label">视频分析</span>
+        <strong id="analysisStageText">排队中</strong>
+        <div class="analysis-progress-track"><i id="analysisProgressBar"></i></div>
+        <span class="mono" id="analysisPercent">—</span>
+        <span class="analysis-detail" id="analysisDetailText"></span>
+        <button class="small-action danger-action" data-action="cancel-analysis" id="cancelAnalysisButton">取消</button>
+      </div>
+
+      <div class="workspace-grid">
+        <aside class="toolrail" aria-label="标注工具">
+          <div class="toolrail-section toolrail-top">
+            <button class="rail-button active" data-tool="select" aria-label="选择工具" title="选择 V">
+              <img class="icon icon-20" src="assets/icons/mouse-pointer-click.svg" alt="" />
+            </button>
+            <button class="rail-button" data-tool="marker" aria-label="打点工具" title="打点 M">
+              <img class="icon icon-20" src="assets/icons/tag.svg" alt="" />
+            </button>
+          </div>
+          <div class="toolrail-section toolrail-bottom">
+            <button class="rail-button" data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">
+              <img class="icon icon-20" src="assets/icons/arrow-left.svg" alt="" />
+            </button>
+            <button class="rail-button" data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">
+              <img class="icon icon-20" src="assets/icons/arrow-right.svg" alt="" />
+            </button>
+            <span class="rail-spacer"></span>
+            <button class="rail-button" data-action="help" aria-label="快捷键帮助" title="快捷键帮助">
+              <img class="icon icon-20" src="assets/icons/circle-question-mark.svg" alt="" />
+            </button>
+            <span class="version-tag">v0.1</span>
+          </div>
+        </aside>
+
+        <main class="editor-area">
+          <div class="editor-toolbar">
+            <div class="toolbar-group">
+              <button class="toolbar-button" data-action="back" aria-label="返回项目">
+                <img class="icon icon-16" src="assets/icons/chevron-left.svg" alt="" />
+              </button>
+              <div>
+                <div class="toolbar-title-row"><span class="toolbar-title" id="toolbarTitle">—</span><button class="toolbar-title-edit icon-only" data-action="rename-project" aria-label="重命名项目" title="重命名项目"><img class="icon icon-14" src="assets/icons/pen-line.svg" alt="重命名" /></button></div>
+                <div class="toolbar-subtitle"><span id="videoSourceLabel">analysis.mp4</span> <span>·</span> <span id="videoDimensions">1920×1080</span> <span>·</span> <span id="fpsLabel">29.97 FPS</span></div>
+              </div>
+            </div>
+            <div class="toolbar-group toolbar-group-right">
+              <div class="tool-status"><span class="live-dot"></span> <span id="dataStatusText">分析数据已加载</span></div>
+              <button class="toolbar-button" data-action="toggle-overlay" aria-pressed="true">
+                <img class="icon icon-16" src="assets/icons/circle-play.svg" alt="" />
+                骨架叠加
+              </button>
+              <button class="toolbar-button icon-only" data-action="toggle-grid" aria-label="切换参考网格">
+                <img class="icon icon-16" src="assets/icons/box.svg" alt="" />
+              </button>
+              <button class="toolbar-button icon-only" data-action="fullscreen" aria-label="全屏">
+                <img class="icon icon-16" src="assets/icons/external-link.svg" alt="" />
+              </button>
+            </div>
+          </div>
+
+          <section class="viewer-stage" id="viewerStage" aria-label="视频预览区">
+            <div class="stage-chrome stage-chrome-top">
+              <div class="stage-label"><span class="record-dot"></span> 分析视频</div>
+              <div class="stage-label mono" id="stageFrameLabel">F: 080 · 00:02.669</div>
+            </div>
+            <div class="stage-grid-overlay" id="stageGrid" aria-hidden="true"></div>
+            <div class="stage-zoom-wrap" id="stageZoomWrap">
+              <video id="stageVideo" class="stage-video hidden" muted playsinline preload="auto"></video>
+              <video id="analysisVideo" class="stage-video stage-overlay-video is-overlay-off" muted playsinline preload="auto"></video>
+              <div class="pose-canvas" id="poseCanvas">
+              <div class="pose-guide vertical"></div>
+              <div class="pose-guide horizontal"></div>
+              <div class="pose-origin">0, 0</div>
+              <svg class="pose-svg" viewBox="0 0 800 440" role="img" aria-label="运动员姿态骨架示意">
+                <g class="pose-shadow" id="poseShadow">
+                  <path d="M388 116 L356 168 L318 224 L302 306 M356 168 L421 177 L477 219 L518 298 M356 168 L350 244 L327 332 L314 386 M421 177 L454 244 L496 333 L516 385" />
+                  <path d="M388 116 L340 94 L315 132 M388 116 L433 93 L461 130" />
+                </g>
+                <g class="pose-lines" id="poseLines">
+                  <path d="M388 116 L356 168 L318 224 L302 306 M356 168 L421 177 L477 219 L518 298 M356 168 L350 244 L327 332 L314 386 M421 177 L454 244 L496 333 L516 385" />
+                  <path d="M388 116 L340 94 L315 132 M388 116 L433 93 L461 130" />
+                  <path d="M340 94 L433 93 M350 244 L454 244 M302 306 L518 298" class="pose-axis" />
+                </g>
+                <g class="pose-joints" id="poseJoints">
+                  <circle cx="388" cy="116" r="12" class="joint-head" />
+                  <circle cx="356" cy="168" r="7" /><circle cx="421" cy="177" r="7" />
+                  <circle cx="350" cy="244" r="7" /><circle cx="454" cy="244" r="7" />
+                  <circle cx="318" cy="224" r="7" /><circle cx="477" cy="219" r="7" />
+                  <circle cx="327" cy="332" r="7" /><circle cx="496" cy="333" r="7" />
+                  <circle cx="302" cy="306" r="7" /><circle cx="518" cy="298" r="7" />
+                  <circle cx="314" cy="386" r="7" /><circle cx="516" cy="385" r="7" />
+                </g>
+                <g class="angle-badges">
+                  <g transform="translate(286 213)"><rect width="76" height="26" rx="4" /><text x="10" y="17">左膝</text><text x="54" y="17" class="badge-value">142°</text></g>
+                  <g transform="translate(482 209)"><rect width="76" height="26" rx="4" /><text x="10" y="17">右膝</text><text x="54" y="17" class="badge-value">139°</text></g>
+                </g>
+              </svg>
+              <div class="stage-measure measure-left"><span>肩胛轴</span><strong>−4.2°</strong></div>
+              <div class="stage-measure measure-right"><span>躯干倾角</span><strong>12.8°</strong></div>
+            </div>
+            </div>
+            <div class="stage-empty hidden" id="stageEmpty">
+              <strong>暂无可分析的项目</strong>
+              <span>请先在分析管线中运行姿态分析生成 motion.json，<br />然后点击右上角「刷新项目」刷新列表。</span>
+              <button class="topbar-button primary stage-empty-action" data-action="analyze-video">
+                <img class="icon icon-16" src="assets/icons/file.svg" alt="" />
+                分析视频
+              </button>
+            </div>
+            <div class="stage-chrome stage-chrome-bottom">
+              <div class="stage-legend"><span><i class="legend-key blue"></i>关键点</span><span><i class="legend-key yellow"></i>建议事件</span></div>
+              <div class="stage-quality"><span>姿态质量</span><strong>94.12%</strong><span class="quality-bar"><i></i></span></div>
+            </div>
+            <div class="stage-zoom-controls" role="group" aria-label="画面缩放">
+              <button class="transport-button" data-action="stage-zoom-out" aria-label="缩小画面" title="缩小画面">−</button>
+              <button class="transport-button stage-zoom-reset mono" data-action="stage-zoom-reset" id="stageZoomReadout" aria-label="重置画面缩放" title="重置为 100%">100%</button>
+              <button class="transport-button" data-action="stage-zoom-in" aria-label="放大画面" title="放大画面">+</button>
+            </div>
+          </section>
+
+          <section class="curve-panel" aria-label="运动指标曲线">
+            <div class="panel-heading compact-heading">
+              <div>
+                <span class="panel-kicker">运动数据</span>
+                <h2>时序指标</h2>
+              </div>
+              <div class="chart-head-right">
+                <div class="chart-tabs" role="tablist" aria-label="曲线指标">
+                  <button class="chart-tab active" data-series="knee" role="tab" aria-selected="true"><i class="series-dot blue"></i>膝角</button>
+                  <button class="chart-tab active" data-series="pelvis" role="tab" aria-selected="true"><i class="series-dot cyan"></i>骨盆 Y</button>
+                  <button class="chart-tab active" data-series="quality" role="tab" aria-selected="true"><i class="series-dot yellow"></i>质量</button>
+                </div>
+                <button class="info-button" data-action="help-chart" aria-label="时序指标说明" title="怎么看这些曲线"><span>ⓘ</span></button>
+              </div>
+            </div>
+            <div class="chart-wrap">
+              <div class="chart-y-labels mono"><span>180°</span><span>120°</span><span>60°</span><span>0°</span></div>
+              <svg class="chart-svg" viewBox="0 0 900 140" preserveAspectRatio="none" aria-label="姿态指标曲线">
+                <g class="chart-grid"><path d="M0 12H900 M0 47H900 M0 82H900 M0 117H900" /></g>
+                <path class="chart-series series-knee" data-series-path="knee" d="M0 67 C50 65 80 80 112 72 C145 64 170 35 210 42 C248 49 271 94 310 88 C348 82 369 44 410 40 C450 36 468 67 506 64 C546 61 572 82 612 76 C650 70 675 49 715 55 C755 61 783 74 824 68 C850 64 876 64 900 66" />
+                <path class="chart-series series-pelvis" data-series-path="pelvis" d="M0 99 C48 94 87 102 120 96 C160 89 187 77 225 81 C266 84 284 99 324 96 C363 93 390 68 430 72 C470 76 498 88 540 84 C583 80 609 66 650 71 C690 76 724 91 762 86 C800 81 845 85 900 79" />
+                <path class="chart-series series-quality" data-series-path="quality" d="M0 34 C46 31 84 39 126 34 C168 29 210 32 252 30 C295 28 338 36 380 31 C422 26 470 34 512 31 C554 28 596 33 638 29 C680 25 728 32 770 27 C812 23 858 30 900 25" />
+                <line class="chart-playhead" id="chartPlayhead" x1="160" y1="0" x2="160" y2="140" />
+              </svg>
+              <div class="chart-x-labels mono"><span>00:00</span><span>00:05</span><span>00:10</span><span>00:15</span></div>
+            </div>
+          </section>
+        </main>
+
+        <aside class="inspector" aria-label="分析检查器">
+          <div class="inspector-tabs" role="tablist">
+            <button class="inspector-tab active" data-inspector-tab="metrics" role="tab" aria-selected="true">帧指标</button>
+            <button class="inspector-tab" data-inspector-tab="markers" role="tab" aria-selected="false">标注 <span class="tab-count" id="markerCount">6</span></button>
+            <button class="inspector-tab" data-inspector-tab="gait" role="tab" aria-selected="false">步态</button>
+            <button class="inspector-tab" data-inspector-tab="report" role="tab" aria-selected="false">报告</button>
+          </div>
+
+          <div class="inspector-panel active" data-inspector-panel="metrics">
+            <div class="inspector-section-head">
+              <div><span class="panel-kicker">帧指标</span><h2>当前帧指标</h2></div>
+              <span class="frame-chip mono" id="frameChip">F:080</span>
+            </div>
+            <div class="metric-grid" id="metricGrid">
+              <article class="metric-card"><span>左膝角度</span><strong data-metric="left_knee_angle">142.13°</strong><small>left_knee_angle</small></article>
+              <article class="metric-card"><span>右膝角度</span><strong data-metric="right_knee_angle">138.70°</strong><small>right_knee_angle</small></article>
+              <article class="metric-card"><span>骨盆 Y</span><strong data-metric="pelvis_y">372.40</strong><small>px · pelvis_y</small></article>
+              <article class="metric-card"><span>躯干倾角</span><strong data-metric="torso_lean_angle">12.80°</strong><small>torso_lean_angle</small></article>
+              <article class="metric-card wide"><span>姿态质量</span><div class="metric-inline"><strong data-metric="pose_quality">0.9412</strong><span class="metric-good">有效</span></div><small>pose_quality · valid_ratio 0.9821</small></article>
+            </div>
+            <div class="inspector-divider"></div>
+              <div class="inspector-section-head section-head-small"><div><span class="panel-kicker">建议事件</span><h2>建议事件</h2></div><span class="muted mono">events.json</span></div>
+            <div class="suggestion-list" id="suggestionList"></div>
+            <div class="metrics-more" id="metricsMore"></div>
+          </div>
+
+          <div class="inspector-panel" data-inspector-panel="markers">
+            <div class="inspector-section-head">
+              <div><span class="panel-kicker">打点标注</span><h2>打点标记</h2></div>
+              <button class="small-action" data-action="add-marker"><img class="icon icon-14" src="assets/icons/circle-plus.svg" alt="" /> 新增</button>
+            </div>
+            <div class="marker-toolbar" id="markerToolbar">
+              <label class="marker-check-all"><input type="checkbox" id="markerSelectAll" aria-label="全选标记" /> <span>全选</span></label>
+              <div class="marker-toolbar-actions">
+                <button class="small-action" data-action="delete-selected-markers" id="deleteSelectedMarkers" disabled title="删除选中的标记">删除选中 <em id="deleteSelectedCount">0</em></button>
+                <button class="small-action danger-link" data-action="clear-markers" id="clearMarkers" title="删除全部标记">清空全部</button>
+              </div>
+            </div>
+            <div class="marker-list" id="markerList"></div>
+            <div class="marker-editor" id="markerEditor">
+              <label>标签<input id="markerLabel" value="起跳瞬间" /></label>
+              <label>备注<textarea id="markerComment" rows="3">右脚蹬离地面</textarea></label>
+              <div class="editor-foot"><span class="muted mono" id="editorFrame">F:080</span><button class="danger-link" data-action="delete-marker"><img class="icon icon-14" src="assets/icons/trash-2.svg" alt="" /> 删除标记</button></div>
+            </div>
+          </div>
+
+          <div class="inspector-panel" data-inspector-panel="gait" hidden>
+            <div class="inspector-section-head">
+              <div><span class="panel-kicker">步态详情</span><h2>步态详情</h2></div>
+              <span class="frame-chip mono" id="gaitStepCount">12 步</span>
+            </div>
+            <div class="gait-summary-grid" id="gaitSummaryGrid"></div>
+            <div class="inspector-divider"></div>
+            <div class="inspector-section-head section-head-small"><div><span class="panel-kicker">参考对比</span><h2>参考对比</h2></div><button class="info-button info-button-sm" data-action="help-zscore" aria-label="参考对比说明" title="数据怎么来、怎么看好坏"><span>ⓘ</span></button></div>
+            <div class="reference-list" id="referenceList"></div>
+            <div class="inspector-divider"></div>
+            <div class="gait-detail-grid" id="gaitDetailGrid"></div>
+          </div>
+
+          <div class="inspector-panel" data-inspector-panel="report" hidden>
+            <div class="inspector-section-head">
+              <div><span class="panel-kicker">分析报告</span><h2>分析报告</h2></div>
+              <div class="report-head-actions">
+                <span class="report-state-chip" id="reportStateChip">待提交</span>
+                <button class="small-action" data-action="print-report" id="printReportButton" disabled title="请先提交分析生成报告"><img class="icon icon-14" src="assets/icons/external-link.svg" alt="" /> 导出报告</button>
+              </div>
+            </div>
+            <div class="report-doc" id="reportDoc">
+              <header class="report-doc-head" id="reportDocHead" hidden>
+                <div class="report-doc-title-row"><h3 id="reportDocTitle">—</h3><span class="report-doc-task mono" id="reportDocTask">—</span></div>
+                <div class="report-doc-sub mono" id="reportDocMeta">—</div>
+              </header>
+              <div class="report-summary" id="reportSummary"></div>
+              <div class="report-mismatch" id="reportMismatch"></div>
+              <section class="report-section" id="reportMarkersSection" hidden>
+                <div class="report-section-head"><span class="panel-kicker">标记详情</span><h4>打点标记明细</h4></div>
+                <div class="report-table-wrap"><table class="report-table" id="reportMarkersTable"></table></div>
+              </section>
+              <section class="report-section" id="reportRefsSection" hidden>
+                <div class="report-section-head"><span class="panel-kicker">参考对比</span><h4>步态参考对比（z 分层）</h4></div>
+                <div class="report-table-wrap"><table class="report-table" id="reportRefsTable"></table></div>
+              </section>
+              <section class="report-section" id="reportTimelineSection" hidden>
+                <div class="report-section-head"><span class="panel-kicker">事件时序</span><h4>关键帧事件</h4></div>
+                <div class="report-timeline" id="reportTimeline"></div>
+              </section>
+              <section class="report-section" id="reportAiSection" hidden>
+                <div class="report-section-head"><span class="panel-kicker">AI 分析</span><h4>智能解读</h4></div>
+                <div class="report-ai" id="reportAi">AI 分析即将上线，敬请期待。</div>
+              </section>
+              <div class="report-note" id="reportNote">提交分析后，任务成功时显示 score_report.json。</div>
+            </div>
+          </div>
+        </aside>
+
+        <section class="timeline-shell" aria-label="视频时间轴">
+          <div class="transport-row">
+            <div class="transport-left">
+              <button class="transport-button" data-action="step-back" aria-label="上一帧" title="上一帧 ←"><img class="icon icon-16" src="assets/icons/chevron-left.svg" alt="" /></button>
+              <button class="transport-button play-button" id="playButton" data-action="play" aria-label="播放" title="播放/暂停 K"><img class="icon icon-16" id="playIcon" src="assets/icons/circle-play.svg" alt="" /></button>
+              <button class="transport-button" data-action="step-forward" aria-label="下一帧" title="下一帧 →"><img class="icon icon-16" src="assets/icons/chevron-right.svg" alt="" /></button>
+              <span class="transport-divider"></span>
+              <button class="transport-button" data-action="add-marker" aria-label="打标记" title="打标记 Space"><img class="icon icon-16" src="assets/icons/tag.svg" alt="" /></button>
+              <button class="transport-button" data-action="undo" aria-label="撤销"><img class="icon icon-16" src="assets/icons/arrow-left.svg" alt="" /></button>
+              <button class="transport-button" data-action="redo" aria-label="重做"><img class="icon icon-16" src="assets/icons/arrow-right.svg" alt="" /></button>
+            </div>
+            <div class="time-readout mono"><strong id="timeCurrent">00:02.669</strong><span>/</span><span id="timeDuration">00:15.015</span><b id="frameReadout">F 080 / 450</b></div>
+            <div class="transport-right">
+              <div class="speed-control"><button class="speed-button mono" id="speedButton" data-action="toggle-speed">1.0× <img class="icon icon-14" src="assets/icons/chevron-down.svg" alt="" /></button><div class="speed-menu" id="speedMenu"><button data-speed="0.5">0.5×</button><button data-speed="0.75">0.75×</button><button data-speed="1">1.0×</button><button data-speed="1.5">1.5×</button><button data-speed="2">2.0×</button></div></div>
+              <button class="transport-button" data-action="toggle-audio" aria-label="静音"><img class="icon icon-16" src="assets/icons/megaphone.svg" alt="" /></button>
+              <span class="transport-divider"></span>
+              <button class="transport-button" data-action="zoom-out" aria-label="缩小时间轴">−</button>
+              <span class="zoom-readout mono" id="zoomReadout">100%</span>
+              <button class="transport-button" data-action="zoom-in" aria-label="放大时间轴">+</button>
+            </div>
+          </div>
+          <div class="timeline-scroll" id="timelineScroll">
+            <div class="timeline-ruler" id="timelineRuler"><div class="ruler-ticks"></div><div class="ruler-times" id="rulerTimes"></div></div>
+            <div class="timeline-track" id="timelineTrack">
+              <div class="track-label"><span class="track-icon">V1</span><span>analysis.mp4</span></div>
+              <div class="track-lane"><div class="track-clip"></div><div class="timeline-markers" id="timelineMarkers"></div><div class="track-playhead" id="trackPlayhead"><span class="playhead-label mono">F:080</span></div></div>
+            </div>
+          </div>
+          <div class="timeline-hints"><span><kbd>←</kbd><kbd>→</kbd> 逐帧</span><span><kbd>Shift</kbd> + 方向键 ±5 帧</span><span><kbd>K</kbd> 播放/暂停</span><span><kbd>Space</kbd> 打点</span><span class="timeline-source mono">motion.json · timestampMs 对齐</span></div>
+        </section>
+      </div>
+    </div>
+    <aside class="task-drawer" id="taskDrawer" aria-label="分析任务" hidden>
+      <div class="task-drawer-head">
+        <div><span class="panel-kicker">分析任务</span><h2 id="taskTitle">提交分析</h2></div>
+        <span class="task-status-chip" id="taskStatusChip">等待</span>
+        <button class="small-action task-dismiss" data-action="dismiss-task" id="taskDismissButton" hidden aria-label="关闭任务面板" title="关闭（Esc）">关闭</button>
+      </div>
+      <div class="task-progress-track"><i id="taskProgressBar"></i></div>
+      <div class="task-progress-copy"><strong id="taskProgressText">等待提交</strong><span class="mono" id="taskPercent">—</span></div>
+      <p class="task-detail" id="taskDetail">标注会连同当前帧指标快照一起提交。</p>
+      <div class="task-drawer-foot"><span class="muted mono" id="taskIdText">task_id —</span><button class="small-action danger-action" data-action="cancel-task" id="cancelTaskButton" disabled>取消任务</button></div>
+    </aside>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <div class="modal-root hidden" id="modalRoot" aria-hidden="true"></div>
+    <script src="contract-adapter.js?v=contract-20260827-1"></script>
+    <script src="demo-data.js?v=demo-data-20260826"></script>
+    <script src="app.js?v=contract-ui-20260827-1"></script>
+  </body>
+</html>

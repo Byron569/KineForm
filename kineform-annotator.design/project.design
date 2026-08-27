@@ -1,0 +1,41 @@
+{
+  "data": [
+    {
+      "id": "page-main",
+      "title": "KineForm 标注客户端主界面",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1756197600000,
+      "canvasData": {
+        "x": 12,
+        "y": 0,
+        "group": 0,
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 900,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-2f80dbc9",
+          "measuredAt": 1787716191046
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/main.html",
+        "interactions": []
+      }
+    }
+  ],
+  "config": {
+    "autoLayout": false,
+    "deviceType": "desktop",
+    "designLibrary": {
+      "name": "Google",
+      "id": "dl_builtin_google",
+      "version": "0",
+      "scope": "built-in-global",
+      "path": "c:\\Users\\Byron\\.trae-cn\\design_libraries\\Google",
+      "versionSource": null
+    },
+    "visualEditorEnabled": true,
+    "showEdge": false
+  }
+}

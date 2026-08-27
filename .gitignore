@@ -1,0 +1,47 @@
+# ---- Python ----
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+user_settings.json
+
+# ---- Node ----
+node_modules/
+dist-electron/
+
+# ---- IDE ----
+.idea/
+.vscode/
+*.swp
+
+# ---- 本地分析数据（视频/产物，不入库）----
+sports_pose_analyzer/projects/
+sports_pose_analyzer/models/
+outputs/
+*.mp4
+*.mov
+*.avi
+*.mkv
+
+# ---- 模型权重 / 大二进制 ----
+*.pth
+*.whl
+*.exe
+
+# ---- 旧版 Java/Tracker 构建（已弃用，体积巨大）----
+dist/
+kineform_build/
+
+# ---- 压缩包 / 设计临时件 ----
+*.zip
+kineform UI/.superpowers/
+
+# ---- 系统/日志 ----
+*.log
+.DS_Store
+Thumbs.db
+
+# ---- 各子项目自身的忽略（由各自 .gitignore 补充）----
+electron/dist/

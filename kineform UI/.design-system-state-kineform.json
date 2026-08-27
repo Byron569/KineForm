@@ -1,0 +1,21 @@
+{
+  "runId": "kineform-davinci-2026-08-26",
+  "fileKey": "8oGxYr6IV3OlJuguqDR1du",
+  "fileUrl": "https://www.figma.com/design/8oGxYr6IV3OlJuguqDR1du",
+  "phase": "phase1",
+  "step": "foundations-collections",
+  "entities": {
+    "collections": {
+      "primitives": "VariableCollectionId:2:2",
+      "colors": "VariableCollectionId:2:3",
+      "spacing": "VariableCollectionId:2:4",
+      "radius": "VariableCollectionId:2:5",
+      "typography": "VariableCollectionId:2:6"
+    },
+    "variables": {},
+    "pages": { "Page 1": "0:1" },
+    "components": {}
+  },
+  "completedSteps": ["P0.a", "P0.b", "P0.c", "P0.d", "P0.e", "P0.f", "P1.a"],
+  "pendingValidations": []
+}
